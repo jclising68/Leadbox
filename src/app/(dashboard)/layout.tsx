@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useWorkspaces } from "@/hooks/use-workspace";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { AppSidebar } from "./components/app-sidebar";
+import { Loader2 } from "lucide-react";
 
 export default function DashboardLayout({
   children,
@@ -16,7 +17,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const { data: workspaces, isLoading: loadingWorkspaces } = useWorkspaces();
-  const { activeWorkspaceId, setActiveWorkspace } = useWorkspaceStore();
+  const { activeWorkspaceId, setActiveWorkspace, switching } = useWorkspaceStore();
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -75,7 +76,16 @@ export default function DashboardLayout({
   return (
     <div className="flex h-screen overflow-hidden">
       <AppSidebar />
-      <main className="flex-1 overflow-hidden">{children}</main>
+      <main className="flex-1 overflow-hidden relative">
+        {switching && (
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm">
+            <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
+            <p className="text-sm font-medium text-foreground">Switching workspace</p>
+            <p className="text-xs text-muted-foreground mt-1">Loading your data...</p>
+          </div>
+        )}
+        {children}
+      </main>
     </div>
   );
 }
