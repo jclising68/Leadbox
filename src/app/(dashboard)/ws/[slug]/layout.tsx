@@ -19,19 +19,27 @@ export default function WorkspaceLayout({
   const slug = params.slug as string;
   const queryClient = useQueryClient();
   const { data: workspaces, isLoading } = useWorkspaces();
-  const { activeWorkspaceId } = useWorkspaceStore();
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
 
   const [loading, setLoading] = useState(true);
   const [prevSlug, setPrevSlug] = useState("");
   const loadStartRef = useRef(Date.now());
 
-  // Detect slug change during render — block content immediately
+  // === RENDER-PHASE: Detect slug change and reset state BEFORE paint ===
   if (slug !== prevSlug) {
     setPrevSlug(slug);
     setLoading(true);
     loadStartRef.current = Date.now();
+
+    // Synchronously reset inbox state so children never see stale filters
+    const inbox = useInboxStore.getState();
+    inbox.clearFilters();
+    inbox.setSelectedThread(null);
+    inbox.setSelectedLabel(null);
+    inbox.setView("OPEN");
   }
 
+  // === EFFECT-PHASE: Sync store, clear cache, then allow render ===
   useEffect(() => {
     if (!workspaces || isLoading || !loading) return;
 
@@ -44,27 +52,24 @@ export default function WorkspaceLayout({
       return;
     }
 
-    // Sync store with this workspace
+    // Sync workspace store with URL
     if (ws.id !== activeWorkspaceId) {
       useWorkspaceStore.getState().setActiveWorkspace(ws.id);
     }
 
-    // Reset inbox state
-    useInboxStore.getState().clearFilters();
-    useInboxStore.getState().setSelectedThread(null);
-    useInboxStore.getState().setSelectedLabel(null);
-    useInboxStore.getState().setView("OPEN");
+    // Clear ONLY workspace-scoped queries (keep "workspaces" list intact)
+    queryClient.removeQueries({ queryKey: ["threads"] });
+    queryClient.removeQueries({ queryKey: ["thread"] });
+    queryClient.removeQueries({ queryKey: ["prospects"] });
+    queryClient.removeQueries({ queryKey: ["labels"] });
 
-    // Wipe ALL cached query data — fresh start for new workspace
-    queryClient.clear();
-
-    // Ensure loading page visible for minimum time
+    // Ensure loading page is visible for minimum time
     const elapsed = Date.now() - loadStartRef.current;
     const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
-
     setTimeout(() => setLoading(false), remaining);
   }, [slug, workspaces, isLoading, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // === LOADING PAGE ===
   if (loading) {
     return (
       <div className="h-full w-full flex flex-col items-center justify-center bg-background">
@@ -85,7 +90,6 @@ export default function WorkspaceLayout({
     );
   }
 
-  // key={slug} forces full remount of ALL children when workspace changes
-  // This guarantees every hook starts fresh with zero cached data
+  // key={slug} forces ALL children to unmount/remount with fresh hooks
   return <div key={slug} className="h-full">{children}</div>;
 }

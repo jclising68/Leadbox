@@ -118,7 +118,7 @@ export function AppSidebar() {
   const collapsed = sidebarCollapsed;
 
   const handleSwitchWorkspace = (ws: { id: string; slug: string }) => {
-    setActiveWorkspace(ws.id);
+    // Just navigate — workspace layout handles everything else
     router.push(`/ws/${ws.slug}/inbox`);
   };
 
