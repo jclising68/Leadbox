@@ -216,6 +216,96 @@ function EditableCell({
   );
 }
 
+// Editable status dropdown for lead status
+function StatusCell({
+  prospectId,
+  value,
+}: {
+  prospectId: string;
+  value: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const queryClient = useQueryClient();
+
+  const save = useCallback(async (newStatus: string) => {
+    if (newStatus === value) {
+      setOpen(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/prospects", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
+        },
+        body: JSON.stringify({ id: prospectId, leadStatus: newStatus }),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+      toast.success("Status updated");
+      await queryClient.invalidateQueries({ queryKey: ["prospects"] });
+    } catch {
+      toast.error("Failed to update status");
+    } finally {
+      setSaving(false);
+      setOpen(false);
+    }
+  }, [value, workspaceId, prospectId, queryClient]);
+
+  const display = value || "";
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger
+        className="inline-flex items-center gap-1 max-w-full cursor-pointer group/status"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {display ? (
+          <span className={cn(
+            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-white truncate max-w-full",
+            getStatusColor(display)
+          )}>
+            {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            {display}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <ChevronDown className="h-3 w-3 opacity-40 group-hover/status:opacity-100" />
+            Set status
+          </span>
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48" onClick={(e) => e.stopPropagation()}>
+        {LEAD_STATUS_OPTIONS.map((s) => (
+          <DropdownMenuItem
+            key={s}
+            onClick={(e) => { e.stopPropagation(); save(s); }}
+            className="text-xs"
+          >
+            <span className={cn("w-2 h-2 rounded-full mr-2 shrink-0", getStatusColor(s))} />
+            {s}
+            {s.toLowerCase() === display.toLowerCase() && <Check className="h-3 w-3 ml-auto" />}
+          </DropdownMenuItem>
+        ))}
+        {display && (
+          <>
+            <div className="border-t my-1" />
+            <DropdownMenuItem
+              onClick={(e) => { e.stopPropagation(); save(""); }}
+              className="text-xs text-muted-foreground"
+            >
+              <X className="h-3 w-3 mr-2" /> Clear status
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 // Provider icon component - Instantly blue bolt, HeyReach teal/green hand-wave
 function ProviderIcon({ provider, channel }: { provider: string | null; channel?: string | null }) {
   // Determine provider from explicit provider, or fall back to channel type
@@ -616,28 +706,12 @@ export default function LeadsPage() {
                     <CopyCell value={(p.domain as string) || "-"} />
                   </div>
 
-                  {/* Lead Status — shows leadStatus field, falls back to thread labels */}
+                  {/* Lead Status — editable dropdown */}
                   <div className="shrink-0 px-3 flex items-center gap-1 overflow-hidden" style={{ width: `${COLUMNS[9].w}px` }}>
-                    {(p.leadStatus as string) ? (
-                      <span className={cn(
-                        "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-white truncate max-w-full",
-                        getStatusColor(p.leadStatus as string)
-                      )}>
-                        {p.leadStatus as string}
-                      </span>
-                    ) : threadLabels.length > 0 ? (
-                      threadLabels.slice(0, 2).map((tl) => (
-                        <Badge
-                          key={tl.label.id}
-                          className="text-[9px] font-normal px-1 py-0 truncate shrink-0"
-                          style={{ backgroundColor: tl.label.color, color: "white" }}
-                        >
-                          {tl.label.name}
-                        </Badge>
-                      ))
-                    ) : (
-                      <span className="text-xs text-muted-foreground">-</span>
-                    )}
+                    <StatusCell
+                      prospectId={p.id as string}
+                      value={(p.leadStatus as string) || (threadLabels[0]?.label?.name || "")}
+                    />
                   </div>
 
                   {/* Campaign */}

@@ -5,15 +5,19 @@ import { persist } from "zustand/middleware";
 
 type WorkspaceStore = {
   activeWorkspaceId: string | null;
+  switching: boolean;
   setActiveWorkspace: (id: string) => void;
+  setSwitching: (v: boolean) => void;
 };
 
 export const useWorkspaceStore = create<WorkspaceStore>()(
   persist(
     (set) => ({
       activeWorkspaceId: null,
-      setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),
+      switching: false,
+      setActiveWorkspace: (id) => set({ activeWorkspaceId: id, switching: true }),
+      setSwitching: (v) => set({ switching: v }),
     }),
-    { name: "leadbox-workspace" }
+    { name: "leadbox-workspace", partialize: (state) => ({ activeWorkspaceId: state.activeWorkspaceId }) }
   )
 );

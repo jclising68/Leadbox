@@ -8,20 +8,22 @@ export async function PATCH(req: NextRequest) {
   if (error) return error;
 
   const body = await req.json();
-  const { id, notes, feedback } = body as {
+  const { id, notes, feedback, leadStatus } = body as {
     id?: string;
     notes?: string;
     feedback?: string;
+    leadStatus?: string;
   };
 
   if (!id) {
     return NextResponse.json({ error: "Missing prospect id" }, { status: 400 });
   }
 
-  // Only allow updating notes and feedback
+  // Only allow updating notes, feedback, and leadStatus
   const data: Prisma.ProspectUpdateInput = {};
   if (notes !== undefined) data.notes = notes;
   if (feedback !== undefined) data.feedback = feedback;
+  if (leadStatus !== undefined) data.leadStatus = leadStatus || null;
 
   if (Object.keys(data).length === 0) {
     return NextResponse.json(
@@ -99,6 +101,18 @@ export async function GET(req: NextRequest) {
     where.thread = {
       ...where.thread as Prisma.ThreadWhereInput,
       messages: { some: { direction: "INBOUND" } },
+    };
+    // Also exclude non-actionable campaign statuses (only show tagged/replied leads)
+    where.NOT = {
+      leadStatus: {
+        in: [
+          "In Sequence", "in sequence",
+          "Completed", "completed",
+          "Not Yet Contacted", "not yet contacted",
+          "In Progress", "in progress",
+          "Paused", "paused",
+        ],
+      },
     };
   }
 
