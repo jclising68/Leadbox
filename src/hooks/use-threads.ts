@@ -59,7 +59,7 @@ export function useThread(threadId: string | null) {
   const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
 
   return useQuery({
-    queryKey: ["thread", threadId],
+    queryKey: ["thread", threadId, workspaceId],
     queryFn: async () => {
       if (!workspaceId || !threadId) return null;
       const res = await fetch(`/api/threads/${threadId}`, {
