@@ -7,6 +7,8 @@ import { useWorkspaces } from "@/hooks/use-workspace";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useInboxStore } from "@/stores/inbox-store";
 
+const MIN_LOADING_MS = 600;
+
 export default function WorkspaceLayout({
   children,
 }: {
@@ -22,9 +24,8 @@ export default function WorkspaceLayout({
   const [loading, setLoading] = useState(true);
   const [prevSlug, setPrevSlug] = useState("");
   const loadStartRef = useRef(Date.now());
-  const MIN_LOADING_MS = 600;
 
-  // Detect slug change during render — immediately block content
+  // Detect slug change during render — block content immediately
   if (slug !== prevSlug) {
     setPrevSlug(slug);
     setLoading(true);
@@ -43,7 +44,7 @@ export default function WorkspaceLayout({
       return;
     }
 
-    // Sync store
+    // Sync store with this workspace
     if (ws.id !== activeWorkspaceId) {
       useWorkspaceStore.getState().setActiveWorkspace(ws.id);
     }
@@ -54,31 +55,14 @@ export default function WorkspaceLayout({
     useInboxStore.getState().setSelectedLabel(null);
     useInboxStore.getState().setView("OPEN");
 
-    // Clear old cached data
-    queryClient.removeQueries({ queryKey: ["threads"] });
-    queryClient.removeQueries({ queryKey: ["thread"] });
-    queryClient.removeQueries({ queryKey: ["prospects"] });
-    queryClient.removeQueries({ queryKey: ["labels"] });
+    // Wipe ALL cached query data — fresh start for new workspace
+    queryClient.clear();
 
-    // Fetch fresh data for this workspace
-    const fetchData = Promise.all([
-      fetch(`/api/threads?status=OPEN&hasReply=true&limit=50`, {
-        headers: { "x-workspace-id": ws.id },
-      }).then(r => r.json()),
-      fetch(`/api/labels`, {
-        headers: { "x-workspace-id": ws.id },
-      }).then(r => r.json()),
-    ]);
+    // Ensure loading page visible for minimum time
+    const elapsed = Date.now() - loadStartRef.current;
+    const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
 
-    // Ensure loading page is visible for at least MIN_LOADING_MS
-    const minDelay = new Promise(resolve =>
-      setTimeout(resolve, Math.max(0, MIN_LOADING_MS - (Date.now() - loadStartRef.current)))
-    );
-
-    Promise.all([fetchData, minDelay])
-      .then(() => setLoading(false))
-      .catch(() => setLoading(false));
-
+    setTimeout(() => setLoading(false), remaining);
   }, [slug, workspaces, isLoading, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
@@ -101,5 +85,7 @@ export default function WorkspaceLayout({
     );
   }
 
-  return <>{children}</>;
+  // key={slug} forces full remount of ALL children when workspace changes
+  // This guarantees every hook starts fresh with zero cached data
+  return <div key={slug} className="h-full">{children}</div>;
 }
