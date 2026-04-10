@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspaces } from "@/hooks/use-workspace";
@@ -19,9 +19,17 @@ export default function WorkspaceLayout({
   const queryClient = useQueryClient();
   const { data: workspaces, isLoading } = useWorkspaces();
   const { activeWorkspaceId, setSwitching } = useWorkspaceStore();
-  const prevSlugRef = useRef(slug);
-  const [dataReady, setDataReady] = useState(false);
 
+  const [dataReady, setDataReady] = useState(false);
+  const [prevSlug, setPrevSlug] = useState(slug);
+
+  // Detect slug change DURING RENDER — blocks stale content before paint
+  if (slug !== prevSlug) {
+    setPrevSlug(slug);
+    setDataReady(false);
+  }
+
+  // Handle workspace sync and data loading
   useEffect(() => {
     if (!workspaces || isLoading) return;
 
@@ -34,53 +42,59 @@ export default function WorkspaceLayout({
       return;
     }
 
-    const slugChanged = prevSlugRef.current !== slug;
-    prevSlugRef.current = slug;
+    // Sync store with URL
+    if (ws.id !== activeWorkspaceId) {
+      useWorkspaceStore.getState().setActiveWorkspace(ws.id);
+    }
 
-    if (slugChanged) {
-      // Block rendering until new data loads
-      setDataReady(false);
-
-      // Sync store if needed
-      if (ws.id !== activeWorkspaceId) {
-        useWorkspaceStore.getState().setActiveWorkspace(ws.id);
-      }
-
-      // Reset filters and selection for new workspace
+    if (!dataReady) {
+      // Reset inbox state for new workspace
       useInboxStore.getState().clearFilters();
       useInboxStore.getState().setSelectedThread(null);
       useInboxStore.getState().setSelectedLabel(null);
       useInboxStore.getState().setView("OPEN");
 
-      // Remove all cached data so old workspace data doesn't flash
+      // Remove ALL old cached data
       queryClient.removeQueries({ queryKey: ["threads"] });
       queryClient.removeQueries({ queryKey: ["thread"] });
       queryClient.removeQueries({ queryKey: ["prospects"] });
       queryClient.removeQueries({ queryKey: ["labels"] });
 
-      // Wait for fresh data to load before showing the page
+      // Refetch fresh data for this workspace, THEN show the page
       Promise.all([
-        queryClient.refetchQueries({ queryKey: ["threads"] }),
-        queryClient.refetchQueries({ queryKey: ["labels"] }),
+        queryClient.fetchQuery({
+          queryKey: ["threads", ws.id],
+          queryFn: async () => {
+            const res = await fetch(`/api/threads?status=OPEN&hasReply=true&limit=50`, {
+              headers: { "x-workspace-id": ws.id },
+            });
+            if (!res.ok) throw new Error("Failed");
+            return res.json();
+          },
+          staleTime: 0,
+        }),
+        queryClient.fetchQuery({
+          queryKey: ["labels", ws.id],
+          queryFn: async () => {
+            const res = await fetch(`/api/labels`, {
+              headers: { "x-workspace-id": ws.id },
+            });
+            if (!res.ok) throw new Error("Failed");
+            return res.json();
+          },
+          staleTime: 0,
+        }),
       ]).then(() => {
         setDataReady(true);
         setSwitching(false);
       }).catch(() => {
-        // Still clear loading even if refetch fails
         setDataReady(true);
         setSwitching(false);
       });
-    } else {
-      // Initial mount or same workspace
-      if (ws.id !== activeWorkspaceId) {
-        useWorkspaceStore.getState().setActiveWorkspace(ws.id);
-      }
-      setDataReady(true);
-      setSwitching(false);
     }
-  }, [slug, workspaces, isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [slug, workspaces, isLoading, dataReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Show loading until workspace data is actually ready
+  // Show branded loading page until data is confirmed ready
   if (isLoading || !dataReady) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-background">

@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 import { useWorkspaces } from "@/hooks/use-workspace";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { AppSidebar } from "./components/app-sidebar";
-import { Loader2 } from "lucide-react";
 
 export default function DashboardLayout({
   children,
@@ -17,7 +16,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const { data: workspaces, isLoading: loadingWorkspaces } = useWorkspaces();
-  const { activeWorkspaceId, setActiveWorkspace, switching } = useWorkspaceStore();
+  const { activeWorkspaceId, setActiveWorkspace } = useWorkspaceStore();
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -88,28 +87,7 @@ export default function DashboardLayout({
   return (
     <div className="flex h-screen overflow-hidden">
       <AppSidebar />
-      <main className="flex-1 overflow-hidden relative">
-        {switching && (
-          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background">
-            {/* Pulsing logo */}
-            <div className="relative mb-8">
-              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center animate-pulse">
-                <span className="text-2xl font-bold text-primary">L</span>
-              </div>
-              {/* Orbiting dot */}
-              <div className="absolute inset-0 animate-spin" style={{ animationDuration: "1.5s" }}>
-                <div className="w-2.5 h-2.5 rounded-full bg-primary absolute -top-1 left-1/2 -translate-x-1/2" />
-              </div>
-            </div>
-            {/* Brand name */}
-            <h2 className="text-xl font-semibold text-foreground mb-2">LeadBox</h2>
-            <p className="text-sm text-muted-foreground mb-6">Switching workspace...</p>
-            {/* Progress bar */}
-            <div className="w-48 h-1 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-primary rounded-full animate-loading-bar" />
-            </div>
-          </div>
-        )}
+      <main className="flex-1 overflow-hidden">
         {children}
       </main>
     </div>
