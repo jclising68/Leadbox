@@ -83,7 +83,7 @@ export default function WorkspaceLayout({
 
   if (loading) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-background">
+      <div className="h-full w-full flex flex-col items-center justify-center bg-background">
         <div className="relative mb-8">
           <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center animate-pulse">
             <span className="text-2xl font-bold text-primary">L</span>
