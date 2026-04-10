@@ -18,7 +18,6 @@ export default function WorkspaceLayout({
   const { activeWorkspaceId, setSwitching } = useWorkspaceStore();
   const prevSlugRef = useRef(slug);
 
-  // Only react to slug changes — the sidebar already sets activeWorkspaceId
   useEffect(() => {
     if (!workspaces || isLoading) return;
 
@@ -35,7 +34,7 @@ export default function WorkspaceLayout({
     prevSlugRef.current = slug;
 
     if (slugChanged) {
-      // Sync store if needed (e.g. direct URL navigation)
+      // Sync store if direct URL navigation
       if (ws.id !== activeWorkspaceId) {
         useWorkspaceStore.getState().setActiveWorkspace(ws.id);
       }
@@ -44,17 +43,13 @@ export default function WorkspaceLayout({
       useInboxStore.getState().setSelectedThread(null);
       useInboxStore.getState().setSelectedLabel(null);
       useInboxStore.getState().setView("OPEN");
-      // Keep loading overlay visible while data refetches
-      const t = setTimeout(() => setSwitching(false), 800);
-      return () => clearTimeout(t);
+    } else if (ws.id !== activeWorkspaceId) {
+      // Initial mount — sync store with URL slug
+      useWorkspaceStore.getState().setActiveWorkspace(ws.id);
     }
 
-    // Initial mount — sync store with URL slug
-    if (ws.id !== activeWorkspaceId) {
-      useWorkspaceStore.getState().setActiveWorkspace(ws.id);
-      // Don't set switching on initial load — dashboard layout handles that
-      setSwitching(false);
-    }
+    // Always clear switching once workspace is resolved
+    setSwitching(false);
   }, [slug, workspaces, isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) {
