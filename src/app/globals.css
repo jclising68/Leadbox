@@ -128,3 +128,14 @@
     @apply font-sans;
   }
 }
+
+/* Loading bar animation for workspace switching */
+@keyframes loading-bar {
+  0% { width: 0%; margin-left: 0; }
+  50% { width: 70%; margin-left: 0; }
+  100% { width: 0%; margin-left: 100%; }
+}
+
+.animate-loading-bar {
+  animation: loading-bar 1.2s ease-in-out infinite;
+}

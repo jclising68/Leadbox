@@ -67,8 +67,20 @@ export default function DashboardLayout({
 
   if (status === "loading" || loadingWorkspaces || !activeWorkspaceId) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-muted-foreground">Loading...</div>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background">
+        <div className="relative mb-8">
+          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center animate-pulse">
+            <span className="text-2xl font-bold text-primary">L</span>
+          </div>
+          <div className="absolute inset-0 animate-spin" style={{ animationDuration: "1.5s" }}>
+            <div className="w-2.5 h-2.5 rounded-full bg-primary absolute -top-1 left-1/2 -translate-x-1/2" />
+          </div>
+        </div>
+        <h2 className="text-xl font-semibold text-foreground mb-2">LeadBox</h2>
+        <p className="text-sm text-muted-foreground mb-6">Preparing your workspace...</p>
+        <div className="w-48 h-1 bg-muted rounded-full overflow-hidden">
+          <div className="h-full bg-primary rounded-full animate-loading-bar" />
+        </div>
       </div>
     );
   }
@@ -78,10 +90,24 @@ export default function DashboardLayout({
       <AppSidebar />
       <main className="flex-1 overflow-hidden relative">
         {switching && (
-          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm">
-            <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
-            <p className="text-sm font-medium text-foreground">Switching workspace</p>
-            <p className="text-xs text-muted-foreground mt-1">Loading your data...</p>
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background">
+            {/* Pulsing logo */}
+            <div className="relative mb-8">
+              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center animate-pulse">
+                <span className="text-2xl font-bold text-primary">L</span>
+              </div>
+              {/* Orbiting dot */}
+              <div className="absolute inset-0 animate-spin" style={{ animationDuration: "1.5s" }}>
+                <div className="w-2.5 h-2.5 rounded-full bg-primary absolute -top-1 left-1/2 -translate-x-1/2" />
+              </div>
+            </div>
+            {/* Brand name */}
+            <h2 className="text-xl font-semibold text-foreground mb-2">LeadBox</h2>
+            <p className="text-sm text-muted-foreground mb-6">Switching workspace...</p>
+            {/* Progress bar */}
+            <div className="w-48 h-1 bg-muted rounded-full overflow-hidden">
+              <div className="h-full bg-primary rounded-full animate-loading-bar" />
+            </div>
           </div>
         )}
         {children}
