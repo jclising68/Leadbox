@@ -35,7 +35,7 @@ export default function WorkspaceLayout({
     inbox.setView("OPEN");
   }
 
-  // Sync workspace store + clear stale cache
+  // Sync store, clear stale cache, PREFETCH data, then render children
   useEffect(() => {
     if (!workspaces || isLoading || ready) return;
 
@@ -57,11 +57,32 @@ export default function WorkspaceLayout({
     queryClient.removeQueries({ queryKey: ["prospects"] });
     queryClient.removeQueries({ queryKey: ["labels"] });
 
-    // Store is synced, cache is clean — allow children to render
-    setReady(true);
+    // Prefetch threads + labels so children find warm cache on mount.
+    // Query keys must match what useThreads() and useLabels() will use
+    // after inbox state reset: view="OPEN", no filters, no search.
+    const headers = { "x-workspace-id": ws.id, "Content-Type": "application/json" };
+
+    Promise.all([
+      fetch(`/api/threads?status=OPEN&hasReply=true&limit=50`, { headers })
+        .then((r) => r.json())
+        .then((data) => {
+          // Store in cache with the exact key useThreads() will look up
+          queryClient.setQueryData(
+            ["threads", ws.id, "OPEN", null, "", null, false, null],
+            { pages: [data], pageParams: [undefined] }
+          );
+        }),
+      fetch(`/api/labels`, { headers })
+        .then((r) => r.json())
+        .then((data) => {
+          queryClient.setQueryData(["labels", ws.id], data);
+        }),
+    ])
+      .then(() => setReady(true))
+      .catch(() => setReady(true)); // Render children even if prefetch fails
   }, [slug, workspaces, isLoading, ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Loading state — blocks children until workspace store is synced
+  // Loading page — blocks until data is prefetched
   if (isLoading || !ready) {
     return (
       <div className="h-full w-full flex flex-col items-center justify-center bg-background">
@@ -82,8 +103,6 @@ export default function WorkspaceLayout({
     );
   }
 
-  // key={slug} forces ALL children to unmount/remount with fresh hooks.
-  // Since all query keys include workspaceId, React Query will never
-  // serve cached data from a different workspace.
+  // key={slug} forces full remount. Children find warm cache from prefetch.
   return <div key={slug} className="h-full">{children}</div>;
 }
