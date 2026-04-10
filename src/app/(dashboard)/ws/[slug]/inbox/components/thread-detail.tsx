@@ -1,0 +1,582 @@
+"use client";
+
+import { useThread, useUpdateThread, useAddLabel, useRemoveLabel, useSendReply } from "@/hooks/use-threads";
+import { useLabels } from "@/hooks/use-labels";
+import { useInboxStore } from "@/stores/inbox-store";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+import {
+  X,
+  Archive,
+  Trash2,
+  AlertCircle,
+  Tag,
+  Inbox,
+  Mail,
+  Link2,
+  Loader2,
+  User,
+  Building,
+  ChevronUp,
+  ChevronDown,
+  RotateCcw,
+  ShieldCheck,
+  Clock,
+  Globe,
+  Briefcase,
+  Zap,
+  Copy,
+  Phone,
+  FileText,
+  MessageSquare,
+  Send,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+
+function DetailRow({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <div className="flex items-start gap-2 group/row">
+      <Icon className="h-3.5 w-3.5 mt-0.5 text-muted-foreground shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <div className="flex items-center gap-1">
+          <p className="text-sm truncate flex-1">{value}</p>
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(value);
+              toast.success("Copied!");
+            }}
+            className="opacity-0 group-hover/row:opacity-100 shrink-0 text-muted-foreground hover:text-foreground transition-opacity"
+            title="Copy"
+          >
+            <Copy className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProviderBadge({ provider }: { provider?: string | null }) {
+  if (!provider) return null;
+  const isInstantly = provider === "INSTANTLY";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium",
+        isInstantly
+          ? "bg-blue-500/10 text-blue-500"
+          : "text-[#00BFA6]"
+      )}
+      style={!isInstantly ? { backgroundColor: "rgba(0,191,166,0.1)" } : undefined}
+    >
+      {isInstantly ? (
+        <Zap className="h-2.5 w-2.5" />
+      ) : (
+        <Send className="h-2.5 w-2.5" />
+      )}
+      {isInstantly ? "Instantly" : "HeyReach"}
+    </span>
+  );
+}
+
+export function ThreadDetail() {
+  const { selectedThreadId, setSelectedThread } = useInboxStore();
+  const { data: thread, isLoading } = useThread(selectedThreadId);
+  const { data: labels } = useLabels();
+  const updateThread = useUpdateThread();
+  const addLabel = useAddLabel();
+  const removeLabel = useRemoveLabel();
+  const sendReply = useSendReply();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [replyText, setReplyText] = useState("");
+
+  // Mark as read when viewing
+  useEffect(() => {
+    if (thread?.isUnread && selectedThreadId) {
+      updateThread.mutate({ threadId: selectedThreadId, data: { isUnread: false } });
+    }
+  }, [thread?.isUnread, selectedThreadId]);
+
+  // Scroll to bottom when thread loads
+  useEffect(() => {
+    if (thread?.messages?.length) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+    }
+  }, [thread?.id, thread?.messages?.length]);
+
+  if (!selectedThreadId) return null;
+
+  if (isLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!thread) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-muted-foreground">
+        Thread not found
+      </div>
+    );
+  }
+
+  const currentLabelIds = new Set(
+    thread.threadLabels?.map((tl: { label: { id: string } }) => tl.label.id) || []
+  );
+  const availableLabels = labels?.filter((l: { id: string }) => !currentLabelIds.has(l.id));
+
+  const prospectName = thread.prospect.firstName || thread.prospect.lastName
+    ? `${thread.prospect.firstName || ""} ${thread.prospect.lastName || ""}`.trim()
+    : thread.prospect.email || "Unknown";
+
+  // Get provider from first message
+  const primaryProvider = thread.messages?.[0]?.integration?.provider;
+
+  return (
+    <div className="flex-1 flex h-full overflow-hidden">
+      {/* Message area - center */}
+      <div className="flex-1 flex flex-col min-w-0 h-full">
+        {/* Toolbar */}
+        <div className="px-4 py-2 border-b flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setSelectedThread(null)}>
+              <X className="h-4 w-4" />
+            </Button>
+            <ChevronUp className="h-4 w-4 text-muted-foreground cursor-pointer" />
+            <ChevronDown className="h-4 w-4 text-muted-foreground cursor-pointer" />
+          </div>
+
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost" size="icon" className="h-7 w-7" title="Refresh"
+              onClick={() => window.location.reload()}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 w-7 rounded-md hover:bg-muted">
+                <Tag className="h-3.5 w-3.5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {availableLabels?.map((label: { id: string; name: string; color: string }) => (
+                  <DropdownMenuItem
+                    key={label.id}
+                    onClick={() => addLabel.mutate({ threadId: thread.id, labelId: label.id })}
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full mr-2" style={{ backgroundColor: label.color }} />
+                    {label.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              variant="ghost" size="icon" className="h-7 w-7"
+              title={thread.isUnread ? "Mark as read" : "Mark as unread"}
+              onClick={() => {
+                updateThread.mutate({ threadId: thread.id, data: { isUnread: !thread.isUnread } });
+                toast.success(thread.isUnread ? "Marked as read" : "Marked as unread");
+              }}
+            >
+              <Clock className="h-3.5 w-3.5" />
+            </Button>
+
+            {/* Context-aware action buttons */}
+            {thread.status === "OPEN" && (
+              <>
+                <Button
+                  variant="ghost" size="icon" className="h-7 w-7" title="Mark as spam"
+                  onClick={() => {
+                    updateThread.mutate({ threadId: thread.id, data: { status: "SPAM" } });
+                    toast.success("Moved to spam");
+                  }}
+                >
+                  <AlertCircle className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost" size="icon" className="h-7 w-7" title="Archive"
+                  onClick={() => {
+                    updateThread.mutate({ threadId: thread.id, data: { status: "ARCHIVED" } });
+                    toast.success("Moved to archive");
+                  }}
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost" size="icon" className="h-7 w-7" title="Trash"
+                  onClick={() => {
+                    updateThread.mutate({ threadId: thread.id, data: { status: "TRASH" } });
+                    toast.success("Moved to trash");
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </>
+            )}
+
+            {thread.status === "ARCHIVED" && (
+              <Button
+                variant="ghost" size="icon" className="h-7 w-7" title="Move to Inbox"
+                onClick={() => {
+                  updateThread.mutate({ threadId: thread.id, data: { status: "OPEN" } });
+                  toast.success("Restored to inbox");
+                }}
+              >
+                <Inbox className="h-3.5 w-3.5" />
+              </Button>
+            )}
+
+            {thread.status === "SPAM" && (
+              <Button
+                variant="ghost" size="sm" className="h-7 gap-1 text-xs" title="Not Spam"
+                onClick={() => {
+                  updateThread.mutate({ threadId: thread.id, data: { status: "OPEN" } });
+                  toast.success("Marked as not spam — restored to inbox");
+                }}
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Not Spam
+              </Button>
+            )}
+
+            {thread.status === "TRASH" && (
+              <Button
+                variant="ghost" size="sm" className="h-7 gap-1 text-xs" title="Restore"
+                onClick={() => {
+                  updateThread.mutate({ threadId: thread.id, data: { status: "OPEN" } });
+                  toast.success("Restored to inbox");
+                }}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Restore
+              </Button>
+            )}
+
+            <DropdownMenu>
+              <DropdownMenuTrigger className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs hover:bg-muted border">
+                Move To
+                <ChevronDown className="h-3 w-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => {
+                  updateThread.mutate({ threadId: thread.id, data: { status: "OPEN" } });
+                  toast.success("Moved to inbox");
+                }}>
+                  <Inbox className="h-3.5 w-3.5 mr-2" /> Inbox
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => {
+                  updateThread.mutate({ threadId: thread.id, data: { status: "ARCHIVED" } });
+                  toast.success("Moved to archive");
+                }}>
+                  <Archive className="h-3.5 w-3.5 mr-2" /> Archive
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => {
+                  updateThread.mutate({ threadId: thread.id, data: { status: "SPAM" } });
+                  toast.success("Moved to spam");
+                }}>
+                  <AlertCircle className="h-3.5 w-3.5 mr-2" /> Spam
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => {
+                  updateThread.mutate({ threadId: thread.id, data: { status: "TRASH" } });
+                  toast.success("Moved to trash");
+                }}>
+                  <Trash2 className="h-3.5 w-3.5 mr-2" /> Trash
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        {/* Sender info bar */}
+        <div className="px-6 py-2.5 border-b flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">
+              {thread.messages?.[0]?.fromEmail || thread.prospect.email || ""}
+            </span>
+            <ProviderBadge provider={primaryProvider} />
+          </div>
+          <div className="flex items-center gap-2">
+            {thread.channel === "EMAIL" ? (
+              <Badge variant="secondary" className="text-[10px] gap-1 font-normal">
+                <Mail className="h-3 w-3" /> Email
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="text-[10px] gap-1 font-normal">
+                <Link2 className="h-3 w-3" /> LinkedIn
+              </Badge>
+            )}
+          </div>
+        </div>
+
+        {/* Scrollable messages area */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <div className="px-6 py-4 space-y-6 max-w-3xl">
+            {thread.messages?.map(
+              (msg: {
+                id: string;
+                direction: string;
+                channel: string;
+                subject: string | null;
+                bodyText: string | null;
+                bodyHtml: string | null;
+                messageText: string | null;
+                fromEmail: string | null;
+                campaignName: string | null;
+                sentAt: string | null;
+                receivedAt: string;
+                integration: { name: string; provider: string } | null;
+              }) => (
+                <div key={msg.id} className="group">
+                  <div className="flex items-center gap-3 mb-2">
+                    {msg.direction === "INBOUND" ? (
+                      <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0">
+                        <span className="text-xs font-medium text-blue-500">
+                          {(thread.prospect.firstName?.[0] || thread.prospect.email?.[0] || "?").toUpperCase()}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                        <span className="text-xs font-medium text-muted-foreground">You</span>
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">
+                          {msg.direction === "INBOUND" ? prospectName : (msg.fromEmail || "You")}
+                        </span>
+                        {msg.integration && (
+                          <ProviderBadge provider={msg.integration.provider} />
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {new Date(msg.sentAt || msg.receivedAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+
+                  <div className={cn(
+                    "rounded-lg px-4 py-3 text-sm leading-relaxed",
+                    msg.direction === "INBOUND"
+                      ? "bg-blue-500/10 ml-11"
+                      : "bg-muted/60 ml-11"
+                  )}>
+                    <div className="whitespace-pre-wrap break-words">
+                      {msg.bodyText || msg.messageText || msg.subject || "No content"}
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
+
+            {/* Label activity */}
+            {thread.threadLabels?.map((tl: {
+              id: string;
+              source: string;
+              appliedAt: string;
+              label: { name: string; color: string };
+            }) => (
+              <div key={tl.id} className="flex items-center justify-center gap-2 text-xs text-muted-foreground py-1">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: tl.label.color }} />
+                <span>
+                  Label <strong>{tl.label.name}</strong> applied
+                  {tl.source === "AUTO_AI" && " by AI"}
+                  {tl.source === "WEBHOOK" && " automatically"}
+                </span>
+              </div>
+            ))}
+
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        {/* Reply composer */}
+        <div className="border-t px-4 py-3 shrink-0">
+          <textarea
+            className="w-full rounded-lg border bg-muted/30 px-3 py-2 text-sm min-h-[60px] max-h-[160px] resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground"
+            placeholder={thread?.channel === "LINKEDIN" ? "Type your LinkedIn message..." : "Type your reply..."}
+            value={replyText}
+            onChange={(e) => setReplyText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && replyText.trim() && !sendReply.isPending) {
+                sendReply.mutate(
+                  { threadId: selectedThreadId!, body: replyText.trim() },
+                  {
+                    onSuccess: () => {
+                      setReplyText("");
+                      toast.success("Message sent");
+                    },
+                    onError: (err) => toast.error(err.message),
+                  }
+                );
+              }
+            }}
+            disabled={sendReply.isPending}
+          />
+          <div className="flex items-center justify-between mt-2">
+            <span className="text-xs text-muted-foreground">
+              {thread?.channel === "LINKEDIN" ? "LinkedIn message" : "Email reply"} · Cmd+Enter to send
+            </span>
+            <Button
+              size="sm"
+              className="gap-1.5"
+              disabled={!replyText.trim() || sendReply.isPending}
+              onClick={() => {
+                sendReply.mutate(
+                  { threadId: selectedThreadId!, body: replyText.trim() },
+                  {
+                    onSuccess: () => {
+                      setReplyText("");
+                      toast.success("Message sent");
+                    },
+                    onError: (err) => toast.error(err.message),
+                  }
+                );
+              }}
+            >
+              {sendReply.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : thread?.channel === "LINKEDIN" ? (
+                <Send className="h-3.5 w-3.5" />
+              ) : (
+                <Mail className="h-3.5 w-3.5" />
+              )}
+              {sendReply.isPending ? "Sending..." : "Send"}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Prospect details panel */}
+      <div className="w-72 border-l bg-muted/10 flex flex-col h-full overflow-hidden shrink-0">
+        <div className="px-4 py-3 border-b flex items-center justify-between shrink-0">
+          <h3 className="text-sm font-semibold">Prospect details</h3>
+          <RotateCcw className="h-3.5 w-3.5 text-muted-foreground cursor-pointer" />
+        </div>
+
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <div className="px-4 py-4">
+            {/* Prospect card */}
+            <div className="flex items-start gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <User className="h-5 w-5 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-sm font-semibold truncate">{prospectName}</h4>
+                {thread.prospect.company && (
+                  <p className="text-xs text-muted-foreground truncate">{thread.prospect.company}</p>
+                )}
+                {thread.prospect.title && (
+                  <p className="text-xs text-muted-foreground truncate">{thread.prospect.title}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Source + Channel */}
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <ProviderBadge provider={primaryProvider} />
+              <Badge variant="secondary" className="text-[10px] gap-1 font-normal">
+                {thread.channel === "EMAIL" ? <Mail className="h-3 w-3" /> : <Link2 className="h-3 w-3" />}
+                {thread.channel === "EMAIL" ? "Email" : "LinkedIn"}
+              </Badge>
+              {thread.prospect.leadStatus && (
+                <Badge variant="outline" className="text-[10px] font-normal">
+                  {thread.prospect.leadStatus}
+                </Badge>
+              )}
+            </div>
+
+            {/* Labels */}
+            {thread.threadLabels?.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-3">
+                {thread.threadLabels?.map((tl: {
+                  id: string;
+                  label: { id: string; name: string; color: string };
+                }) => (
+                  <Badge
+                    key={tl.id}
+                    className="text-xs gap-1 pr-1"
+                    style={{ backgroundColor: tl.label.color, color: "white" }}
+                  >
+                    {tl.label.name}
+                    <button
+                      onClick={() => removeLabel.mutate({ threadId: thread.id, labelId: tl.label.id })}
+                      className="ml-0.5 hover:bg-white/20 rounded p-0.5"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            <Separator className="my-3" />
+
+            {/* Contact Info */}
+            <div className="space-y-2.5">
+              <h5 className="text-xs font-semibold uppercase text-muted-foreground">Contact</h5>
+              <DetailRow icon={Mail} label="Email" value={thread.prospect.email} />
+              <DetailRow icon={Phone} label="Phone" value={thread.prospect.phone} />
+              <DetailRow icon={Link2} label="LinkedIn" value={thread.prospect.linkedinUrl} />
+            </div>
+
+            <Separator className="my-3" />
+
+            {/* Company Info */}
+            <div className="space-y-2.5">
+              <h5 className="text-xs font-semibold uppercase text-muted-foreground">Company</h5>
+              <DetailRow icon={Building} label="Company" value={thread.prospect.company} />
+              <DetailRow icon={Briefcase} label="Title" value={thread.prospect.title} />
+              <DetailRow icon={Globe} label="Domain" value={thread.prospect.domain} />
+            </div>
+
+            <Separator className="my-3" />
+
+            {/* Campaign Info */}
+            <div className="space-y-2.5">
+              <h5 className="text-xs font-semibold uppercase text-muted-foreground">Campaign</h5>
+              <DetailRow icon={Globe} label="Campaign" value={thread.prospect.campaignName || thread.messages?.[0]?.campaignName} />
+              <DetailRow icon={Zap} label="Step Replied" value={thread.prospect.stepReplied} />
+              <div className="flex items-start gap-2">
+                <MessageSquare className="h-3.5 w-3.5 mt-0.5 text-muted-foreground shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Messages</p>
+                  <p className="text-sm">{thread.messageCount || thread.messages?.length || 0}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Notes & Feedback */}
+            {(thread.prospect.notes || thread.prospect.feedback) && (
+              <>
+                <Separator className="my-3" />
+                <div className="space-y-2.5">
+                  <h5 className="text-xs font-semibold uppercase text-muted-foreground">Notes</h5>
+                  <DetailRow icon={FileText} label="Notes" value={thread.prospect.notes} />
+                  <DetailRow icon={MessageSquare} label="Feedback" value={thread.prospect.feedback} />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

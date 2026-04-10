@@ -1,0 +1,297 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── AUTH & WORKSPACE ────────────────────────────────
+
+model User {
+  id           String            @id @default(cuid())
+  email        String            @unique
+  name         String?
+  passwordHash String?
+  avatarUrl    String?
+  linkedinUrl  String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  memberships  WorkspaceMember[]
+  accounts     Account[]
+  sessions     Session[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Workspace {
+  id           String            @id @default(cuid())
+  name         String
+  slug         String            @unique
+  openaiKey    String?           // Encrypted OpenAI API key
+  openaiKeyIv  String?
+  openaiKeyTag String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  members      WorkspaceMember[]
+  integrations Integration[]
+  labels       Label[]
+  prospects    Prospect[]
+  threads      Thread[]
+  messages     Message[]
+  webhookLogs  WebhookLog[]
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        Role      @default(MEMBER)
+  joinedAt    DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+// ─── INTEGRATIONS ────────────────────────────────────
+
+model Integration {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  provider        Provider
+  name            String
+  apiKeyEncrypted String
+  apiKeyIv        String
+  apiKeyTag       String
+  webhookSecret   String
+  isActive        Boolean  @default(true)
+  lastSyncAt      DateTime?
+  config          Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  messages        Message[]
+
+  @@index([workspaceId, provider])
+  @@index([workspaceId, isActive])
+}
+
+enum Provider {
+  INSTANTLY
+  HEYREACH
+}
+
+// ─── PROSPECTS & THREADS ─────────────────────────────
+
+model Prospect {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  email        String?
+  linkedinUrl  String?
+  firstName    String?
+  lastName     String?
+  company      String?
+  title        String?
+  domain       String?
+  phone        String?
+  leadStatus   String?
+  campaignName String?
+  stepReplied  String?
+  notes        String?
+  feedback     String?
+  sourceDate   DateTime?
+  externalIds  Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  thread       Thread?
+
+  @@unique([workspaceId, email])
+  @@unique([workspaceId, linkedinUrl])
+  @@index([workspaceId])
+  @@index([workspaceId, company])
+  @@index([workspaceId, updatedAt])
+  @@index([domain])
+}
+
+model Thread {
+  id            String       @id @default(cuid())
+  workspaceId   String
+  prospectId    String       @unique
+  channel       Channel      @default(EMAIL)
+  status        ThreadStatus @default(OPEN)
+  isUnread      Boolean      @default(true)
+  snippet       String?
+  lastMessageAt DateTime?
+  messageCount  Int          @default(0)
+  assignedTo    String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  prospect      Prospect     @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  messages      Message[]
+  threadLabels  ThreadLabel[]
+
+  @@index([workspaceId, status, lastMessageAt])
+  @@index([workspaceId, isUnread])
+  @@index([assignedTo])
+}
+
+enum Channel {
+  EMAIL
+  LINKEDIN
+}
+
+enum ThreadStatus {
+  OPEN
+  ARCHIVED
+  SPAM
+  TRASH
+}
+
+// ─── MESSAGES ────────────────────────────────────────
+
+model Message {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  threadId      String
+  integrationId String?
+  direction     Direction
+  channel       Channel   @default(EMAIL)
+  fromEmail     String?
+  toEmail       String?
+  subject       String?
+  bodyText      String?
+  bodyHtml      String?
+  linkedinFrom  String?
+  linkedinTo    String?
+  messageText   String?
+  externalId    String?
+  campaignId    String?
+  campaignName  String?
+  eventType     String?
+  rawPayload    Json?
+  sentAt        DateTime?
+  receivedAt    DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  thread        Thread       @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  integration   Integration? @relation(fields: [integrationId], references: [id], onDelete: SetNull)
+
+  @@unique([externalId, workspaceId])
+  @@index([threadId, receivedAt])
+  @@index([workspaceId, receivedAt])
+  @@index([integrationId, sentAt])
+  @@index([campaignId])
+}
+
+enum Direction {
+  INBOUND
+  OUTBOUND
+}
+
+// ─── LABELS ──────────────────────────────────────────
+
+model Label {
+  id           String        @id @default(cuid())
+  workspaceId  String
+  name         String
+  color        String        @default("#6B7280")
+  icon         String?
+  isSystem     Boolean       @default(false)
+  sortOrder    Int           @default(0)
+  createdAt    DateTime      @default(now())
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  threadLabels ThreadLabel[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+model ThreadLabel {
+  id         String      @id @default(cuid())
+  threadId   String
+  labelId    String
+  source     LabelSource @default(MANUAL)
+  confidence Float?
+  appliedAt  DateTime    @default(now())
+  thread     Thread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  label      Label       @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, labelId])
+  @@index([labelId])
+}
+
+enum LabelSource {
+  MANUAL
+  AUTO_AI
+  WEBHOOK
+}
+
+// ─── WEBHOOK LOGS ────────────────────────────────────
+
+model WebhookLog {
+  id           String        @id @default(cuid())
+  workspaceId  String
+  provider     Provider
+  eventType    String
+  payload      Json
+  status       WebhookStatus @default(PENDING)
+  errorMessage String?
+  processedAt  DateTime?
+  createdAt    DateTime      @default(now())
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([status])
+}
+
+enum WebhookStatus {
+  PENDING
+  PROCESSED
+  FAILED
+  SKIPPED
+}

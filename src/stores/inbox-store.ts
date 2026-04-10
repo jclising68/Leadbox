@@ -1,0 +1,58 @@
+"use client";
+
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+
+type InboxView = "ALL" | "OPEN" | "ARCHIVED" | "SPAM" | "TRASH";
+
+type InboxStore = {
+  view: InboxView;
+  selectedThreadId: string | null;
+  selectedLabelId: string | null;
+  searchQuery: string;
+  sidebarCollapsed: boolean;
+  filterChannel: string | null;
+  filterCampaign: string | null;
+  filterUnread: boolean;
+  filterDateFrom: string | null;
+  setView: (view: InboxView) => void;
+  setSelectedThread: (id: string | null) => void;
+  setSelectedLabel: (id: string | null) => void;
+  setSearchQuery: (query: string) => void;
+  toggleSidebar: () => void;
+  setFilterChannel: (ch: string | null) => void;
+  setFilterCampaign: (c: string | null) => void;
+  setFilterUnread: (u: boolean) => void;
+  setFilterDateFrom: (d: string | null) => void;
+  clearFilters: () => void;
+};
+
+export const useInboxStore = create<InboxStore>()(
+  persist(
+    (set) => ({
+      view: "OPEN",
+      selectedThreadId: null,
+      selectedLabelId: null,
+      searchQuery: "",
+      sidebarCollapsed: false,
+      filterChannel: null,
+      filterCampaign: null,
+      filterUnread: false,
+      filterDateFrom: null,
+      setView: (view) => set({ view, selectedLabelId: null }),
+      setSelectedThread: (id) => set({ selectedThreadId: id }),
+      setSelectedLabel: (id) => set({ selectedLabelId: id, view: "ALL" }),
+      setSearchQuery: (query) => set({ searchQuery: query }),
+      toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+      setFilterChannel: (ch) => set({ filterChannel: ch }),
+      setFilterCampaign: (c) => set({ filterCampaign: c }),
+      setFilterUnread: (u) => set({ filterUnread: u }),
+      setFilterDateFrom: (d) => set({ filterDateFrom: d }),
+      clearFilters: () => set({ filterChannel: null, filterCampaign: null, filterUnread: false, filterDateFrom: null, searchQuery: "" }),
+    }),
+    {
+      name: "leadbox-inbox",
+      partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed }),
+    }
+  )
+);

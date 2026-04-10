@@ -1,0 +1,341 @@
+"use client";
+
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { toast } from "sonner";
+import { Copy, Plus, Check, Loader2, Plug, Trash2, RefreshCw, Database } from "lucide-react";
+
+function headers(wId: string) {
+  return { "x-workspace-id": wId, "Content-Type": "application/json" };
+}
+
+export default function IntegrationsPage() {
+  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [provider, setProvider] = useState("INSTANTLY");
+  const [name, setName] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const { data: integrations, isLoading } = useQuery({
+    queryKey: ["integrations", workspaceId],
+    queryFn: async () => {
+      const res = await fetch("/api/integrations", {
+        headers: headers(workspaceId!),
+      });
+      return res.json();
+    },
+    enabled: !!workspaceId,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/integrations", {
+        method: "POST",
+        headers: headers(workspaceId!),
+        body: JSON.stringify({ provider, name, apiKey }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["integrations"] });
+      setOpen(false);
+      setName("");
+      setApiKey("");
+      toast.success("Integration added! Syncing previous conversations in the background...");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const testMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/integrations/${id}/test`, {
+        method: "POST",
+        headers: headers(workspaceId!),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: () => toast.success("Connection successful!"),
+    onError: (err) => toast.error(`Connection failed: ${err.message}`),
+  });
+
+  const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set());
+  const [enrichingIds, setEnrichingIds] = useState<Set<string>>(new Set());
+
+  const syncMutation = useMutation({
+    mutationFn: async (id: string) => {
+      setSyncingIds((prev) => new Set(prev).add(id));
+      const res = await fetch(`/api/integrations/${id}/sync`, {
+        method: "POST",
+        headers: headers(workspaceId!),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      return { ...data, _id: id };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["integrations"] });
+      queryClient.invalidateQueries({ queryKey: ["threads"] });
+      if (data.status === "already_running") {
+        toast.info("Sync is already in progress...");
+      } else {
+        toast.success("Sync started! This may take several minutes.");
+      }
+    },
+    onError: (err) => toast.error(`Sync failed: ${err.message}`),
+    onSettled: (_d, _e, id) => {
+      setSyncingIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    },
+  });
+
+  const enrichMutation = useMutation({
+    mutationFn: async (id: string) => {
+      setEnrichingIds((prev) => new Set(prev).add(id));
+      const res = await fetch(`/api/integrations/${id}/enrich`, {
+        method: "POST",
+        headers: headers(workspaceId!),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: (data) => {
+      if (data.status === "already_running") {
+        toast.info("Enrichment already in progress...");
+      } else {
+        toast.success("Enrichment started! Lead details (company, title, status) will be fetched in background.");
+      }
+    },
+    onError: (err) => toast.error(`Enrich failed: ${err.message}`),
+    onSettled: (_d, _e, id) => {
+      setEnrichingIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    },
+  });
+
+  function copyWebhookUrl(url: string, id: string) {
+    navigator.clipboard.writeText(url);
+    setCopied(id);
+    setTimeout(() => setCopied(null), 2000);
+    toast.success("Webhook URL copied to clipboard");
+  }
+
+  return (
+    <div className="max-w-3xl">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-semibold">Integrations</h1>
+          <p className="text-sm text-muted-foreground">
+            Connect your outreach tools to receive messages
+          </p>
+        </div>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            <Plus className="h-4 w-4" />
+            Add Integration
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add Integration</DialogTitle>
+              <DialogDescription>
+                Connect Instantly or HeyReach to receive messages
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Provider</Label>
+                <Select value={provider} onValueChange={(v) => v && setProvider(v)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="INSTANTLY">Instantly.ai</SelectItem>
+                    <SelectItem value="HEYREACH">HeyReach</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Name</Label>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g., Main Account"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>API Key</Label>
+                <Input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Your API key"
+                />
+              </div>
+              <Button
+                className="w-full"
+                onClick={() => createMutation.mutate()}
+                disabled={!name || !apiKey || createMutation.isPending}
+              >
+                {createMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : null}
+                Add Integration
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : integrations?.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center py-12">
+            <Plug className="h-10 w-10 text-muted-foreground mb-3" />
+            <p className="text-sm text-muted-foreground">
+              No integrations connected yet
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {integrations?.map(
+            (int: {
+              id: string;
+              provider: string;
+              name: string;
+              isActive: boolean;
+              apiKeyMasked: string;
+              webhookUrl: string;
+              lastSyncAt: string | null;
+              lastActivityAt: string | null;
+              totalMessages: number;
+              syncing: boolean;
+              enriching: boolean;
+              createdAt: string;
+            }) => (
+              <Card key={int.id}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CardTitle className="text-base">{int.name}</CardTitle>
+                      <Badge variant={int.isActive ? "default" : "secondary"}>
+                        {int.provider}
+                      </Badge>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => syncMutation.mutate(int.id)}
+                        disabled={syncingIds.has(int.id) || int.syncing}
+                      >
+                        {syncingIds.has(int.id) || int.syncing ? (
+                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                        ) : (
+                          <RefreshCw className="h-3 w-3 mr-1" />
+                        )}
+                        Sync
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => enrichMutation.mutate(int.id)}
+                        disabled={enrichingIds.has(int.id) || int.enriching}
+                      >
+                        {enrichingIds.has(int.id) || int.enriching ? (
+                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                        ) : (
+                          <Database className="h-3 w-3 mr-1" />
+                        )}
+                        Enrich
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => testMutation.mutate(int.id)}
+                        disabled={testMutation.isPending}
+                      >
+                        {testMutation.isPending ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          "Test"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                  <CardDescription>
+                    API Key: {int.apiKeyMasked}
+                    {int.totalMessages > 0 && (
+                      <> &middot; {int.totalMessages.toLocaleString()} messages</>
+                    )}
+                    {int.lastSyncAt && (
+                      <> &middot; Last sync: {new Date(int.lastSyncAt).toLocaleString()}</>
+                    )}
+                    {int.lastActivityAt && (
+                      <> &middot; Last activity: {new Date(int.lastActivityAt).toLocaleString()}</>
+                    )}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">
+                      Webhook URL (paste this in {int.provider.toLowerCase() === "instantly" ? "Instantly" : "HeyReach"})
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        readOnly
+                        value={int.webhookUrl}
+                        className="text-xs font-mono"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => copyWebhookUrl(int.webhookUrl, int.id)}
+                      >
+                        {copied === int.id ? (
+                          <Check className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

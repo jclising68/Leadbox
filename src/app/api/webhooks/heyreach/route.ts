@@ -1,0 +1,128 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { normalizeHeyreachWebhook } from "@/services/webhook-processor";
+import { resolveThread } from "@/services/thread-resolver";
+import {
+  classifyMessage,
+  classificationToLabelName,
+  applyAutoLabel,
+} from "@/services/auto-labeler";
+
+export async function POST(req: NextRequest) {
+  try {
+    const workspaceId = req.nextUrl.searchParams.get("workspace_id");
+    const secret = req.nextUrl.searchParams.get("secret");
+
+    if (!workspaceId || !secret) {
+      return NextResponse.json(
+        { error: "Missing workspace_id or secret" },
+        { status: 400 }
+      );
+    }
+
+    // Validate webhook secret
+    const integration = await prisma.integration.findFirst({
+      where: {
+        workspaceId,
+        provider: "HEYREACH",
+        webhookSecret: secret,
+        isActive: true,
+      },
+    });
+
+    if (!integration) {
+      return NextResponse.json({ error: "Invalid secret" }, { status: 401 });
+    }
+
+    const payload = (await req.json()) as Record<string, unknown>;
+
+    // Log webhook
+    const log = await prisma.webhookLog.create({
+      data: {
+        workspaceId,
+        provider: "HEYREACH",
+        eventType:
+          (payload.event_type as string) ||
+          (payload.eventType as string) ||
+          "unknown",
+        payload: payload as object,
+        status: "PENDING",
+      },
+    });
+
+    // Normalize and process
+    const normalized = normalizeHeyreachWebhook(payload);
+
+    if (!normalized.prospectLinkedinUrl && !normalized.prospectEmail) {
+      await prisma.webhookLog.update({
+        where: { id: log.id },
+        data: {
+          status: "SKIPPED",
+          errorMessage: "No prospect identifier",
+          processedAt: new Date(),
+        },
+      });
+      return NextResponse.json({
+        status: "skipped",
+        reason: "no_identifier",
+      });
+    }
+
+    const { thread, message } = await resolveThread(
+      workspaceId,
+      integration.id,
+      normalized
+    );
+
+    // Apply source label if available
+    if (normalized.sourceLabel) {
+      await applyAutoLabel(
+        workspaceId,
+        thread.id,
+        normalized.sourceLabel,
+        1.0,
+        "WEBHOOK"
+      );
+    }
+
+    // Auto-classify inbound messages with AI
+    if (normalized.direction === "INBOUND" && !normalized.sourceLabel) {
+      classifyMessage(workspaceId, message.id)
+        .then(async (result) => {
+          if (result && result.confidence >= 0.7) {
+            const labelName = classificationToLabelName(result.label);
+            await applyAutoLabel(
+              workspaceId,
+              thread.id,
+              labelName,
+              result.confidence,
+              "AUTO_AI"
+            );
+          }
+        })
+        .catch(console.error);
+    }
+
+    await prisma.webhookLog.update({
+      where: { id: log.id },
+      data: { status: "PROCESSED", processedAt: new Date() },
+    });
+
+    await prisma.integration.update({
+      where: { id: integration.id },
+      data: { lastSyncAt: new Date() },
+    });
+
+    return NextResponse.json({
+      status: "processed",
+      threadId: thread.id,
+      messageId: message.id,
+    });
+  } catch (error) {
+    console.error("HeyReach webhook error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
