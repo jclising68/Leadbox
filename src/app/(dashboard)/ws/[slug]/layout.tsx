@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspaces } from "@/hooks/use-workspace";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useInboxStore } from "@/stores/inbox-store";
-import { Loader2 } from "lucide-react";
 
 export default function WorkspaceLayout({
   children,
@@ -18,20 +17,22 @@ export default function WorkspaceLayout({
   const slug = params.slug as string;
   const queryClient = useQueryClient();
   const { data: workspaces, isLoading } = useWorkspaces();
-  const { activeWorkspaceId, setSwitching } = useWorkspaceStore();
+  const { activeWorkspaceId } = useWorkspaceStore();
 
-  const [dataReady, setDataReady] = useState(false);
-  const [prevSlug, setPrevSlug] = useState(slug);
+  const [loading, setLoading] = useState(true);
+  const [prevSlug, setPrevSlug] = useState("");
+  const loadStartRef = useRef(Date.now());
+  const MIN_LOADING_MS = 600;
 
-  // Detect slug change DURING RENDER — blocks stale content before paint
+  // Detect slug change during render — immediately block content
   if (slug !== prevSlug) {
     setPrevSlug(slug);
-    setDataReady(false);
+    setLoading(true);
+    loadStartRef.current = Date.now();
   }
 
-  // Handle workspace sync and data loading
   useEffect(() => {
-    if (!workspaces || isLoading) return;
+    if (!workspaces || isLoading || !loading) return;
 
     const ws = workspaces.find((w: { slug: string }) => w.slug === slug);
 
@@ -42,60 +43,45 @@ export default function WorkspaceLayout({
       return;
     }
 
-    // Sync store with URL
+    // Sync store
     if (ws.id !== activeWorkspaceId) {
       useWorkspaceStore.getState().setActiveWorkspace(ws.id);
     }
 
-    if (!dataReady) {
-      // Reset inbox state for new workspace
-      useInboxStore.getState().clearFilters();
-      useInboxStore.getState().setSelectedThread(null);
-      useInboxStore.getState().setSelectedLabel(null);
-      useInboxStore.getState().setView("OPEN");
+    // Reset inbox state
+    useInboxStore.getState().clearFilters();
+    useInboxStore.getState().setSelectedThread(null);
+    useInboxStore.getState().setSelectedLabel(null);
+    useInboxStore.getState().setView("OPEN");
 
-      // Remove ALL old cached data
-      queryClient.removeQueries({ queryKey: ["threads"] });
-      queryClient.removeQueries({ queryKey: ["thread"] });
-      queryClient.removeQueries({ queryKey: ["prospects"] });
-      queryClient.removeQueries({ queryKey: ["labels"] });
+    // Clear old cached data
+    queryClient.removeQueries({ queryKey: ["threads"] });
+    queryClient.removeQueries({ queryKey: ["thread"] });
+    queryClient.removeQueries({ queryKey: ["prospects"] });
+    queryClient.removeQueries({ queryKey: ["labels"] });
 
-      // Refetch fresh data for this workspace, THEN show the page
-      Promise.all([
-        queryClient.fetchQuery({
-          queryKey: ["threads", ws.id],
-          queryFn: async () => {
-            const res = await fetch(`/api/threads?status=OPEN&hasReply=true&limit=50`, {
-              headers: { "x-workspace-id": ws.id },
-            });
-            if (!res.ok) throw new Error("Failed");
-            return res.json();
-          },
-          staleTime: 0,
-        }),
-        queryClient.fetchQuery({
-          queryKey: ["labels", ws.id],
-          queryFn: async () => {
-            const res = await fetch(`/api/labels`, {
-              headers: { "x-workspace-id": ws.id },
-            });
-            if (!res.ok) throw new Error("Failed");
-            return res.json();
-          },
-          staleTime: 0,
-        }),
-      ]).then(() => {
-        setDataReady(true);
-        setSwitching(false);
-      }).catch(() => {
-        setDataReady(true);
-        setSwitching(false);
-      });
-    }
-  }, [slug, workspaces, isLoading, dataReady]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Fetch fresh data for this workspace
+    const fetchData = Promise.all([
+      fetch(`/api/threads?status=OPEN&hasReply=true&limit=50`, {
+        headers: { "x-workspace-id": ws.id },
+      }).then(r => r.json()),
+      fetch(`/api/labels`, {
+        headers: { "x-workspace-id": ws.id },
+      }).then(r => r.json()),
+    ]);
 
-  // Show branded loading page until data is confirmed ready
-  if (isLoading || !dataReady) {
+    // Ensure loading page is visible for at least MIN_LOADING_MS
+    const minDelay = new Promise(resolve =>
+      setTimeout(resolve, Math.max(0, MIN_LOADING_MS - (Date.now() - loadStartRef.current)))
+    );
+
+    Promise.all([fetchData, minDelay])
+      .then(() => setLoading(false))
+      .catch(() => setLoading(false));
+
+  }, [slug, workspaces, isLoading, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-background">
         <div className="relative mb-8">
