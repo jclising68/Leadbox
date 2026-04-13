@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { useWorkspaces } from "@/hooks/use-workspace";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 
 export default function WorkspacePage() {
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaceId = useCurrentWorkspaceId();
   const { setActiveWorkspace } = useWorkspaceStore();
   const { data: workspaces, isLoading } = useWorkspaces();
   const queryClient = useQueryClient();

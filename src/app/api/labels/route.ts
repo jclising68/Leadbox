@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
+import { workspaceJson } from "@/lib/api-response";
 
 export async function GET(req: NextRequest) {
   const { error, workspaceId } = await requireWorkspaceAccess(req);
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
     orderBy: { sortOrder: "asc" },
   });
 
-  return NextResponse.json(labels);
+  return workspaceJson(labels);
 }
 
 export async function POST(req: NextRequest) {

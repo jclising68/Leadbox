@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -14,7 +14,7 @@ import {
 import { Loader2 } from "lucide-react";
 
 export default function WebhooksPage() {
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaceId = useCurrentWorkspaceId();
 
   const { data: logs, isLoading } = useQuery({
     queryKey: ["webhook-logs", workspaceId],

@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useProspects } from "@/hooks/use-prospects";
 import { useLabels } from "@/hooks/use-labels";
 import { useInboxStore } from "@/stores/inbox-store";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { useRouter, useParams } from "next/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQueryClient } from "@tanstack/react-query";
@@ -117,7 +117,7 @@ function EditableCell({
   const [localValue, setLocalValue] = useState(value);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaceId = useCurrentWorkspaceId();
   const queryClient = useQueryClient();
 
   // Keep local value in sync with prop when not editing
@@ -226,7 +226,7 @@ function StatusCell({
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaceId = useCurrentWorkspaceId();
   const queryClient = useQueryClient();
 
   const save = useCallback(async (newStatus: string) => {

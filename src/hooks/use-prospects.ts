@@ -1,7 +1,7 @@
 "use client";
 
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { useEffect, useState } from "react";
 
 function useDebounce(value: string, delay: number) {
@@ -34,7 +34,7 @@ export function useProspects({
   dateTo?: string;
   leadStatus?: string;
 } = {}) {
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaceId = useCurrentWorkspaceId();
   const debouncedSearch = useDebounce(search, 300);
 
   return useInfiniteQuery({
@@ -58,6 +58,7 @@ export function useProspects({
 
       const res = await fetch(`/api/prospects?${params}`, {
         headers: { "x-workspace-id": workspaceId },
+        cache: "no-store",
       });
       if (!res.ok) throw new Error("Failed to fetch prospects");
       return res.json();

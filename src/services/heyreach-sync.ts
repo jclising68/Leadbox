@@ -218,7 +218,12 @@ export async function syncHeyreach(integrationId: string): Promise<{
         messageText: msg.body,
         externalId,
         sentAt: msg.createdAt ? new Date(msg.createdAt) : undefined,
-        rawPayload: { conversationId: conv.id, message: msg } as unknown as Record<string, unknown>,
+        rawPayload: {
+          conversationId: conv.id,
+          linkedInAccountId: conv.linkedInAccountId,
+          linkedInAccount: conv.linkedInAccount,
+          message: msg,
+        } as unknown as Record<string, unknown>,
       });
     }
   }

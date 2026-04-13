@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth-helpers";
+import { workspaceJson } from "@/lib/api-response";
 import { DEFAULT_LABELS } from "@/lib/constants";
 
 export async function GET(req: NextRequest) {
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
     orderBy: { createdAt: "asc" },
   });
 
-  return NextResponse.json(workspaces);
+  return workspaceJson(workspaces);
 }
 
 export async function POST(req: NextRequest) {

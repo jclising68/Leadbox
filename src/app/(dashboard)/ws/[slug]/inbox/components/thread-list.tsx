@@ -2,11 +2,14 @@
 
 import { useThreads } from "@/hooks/use-threads";
 import { useInboxStore } from "@/stores/inbox-store";
+import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Mail, Link2, Loader2, Filter, X, SlidersHorizontal, Zap, Send } from "lucide-react";
+import { Mail, Link2, Loader2, Filter, X, SlidersHorizontal, Zap, Send, RefreshCw, Search } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useRef, useCallback, useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useRef, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 function formatDate(date: string) {
   const d = new Date(date);
@@ -26,15 +29,46 @@ function getInitials(firstName?: string | null, lastName?: string | null, email?
 }
 
 export function ThreadList() {
-  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useThreads();
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage, refetch } = useThreads();
   const {
     selectedThreadId, setSelectedThread, view,
     filterChannel, setFilterChannel,
     filterUnread, setFilterUnread,
     filterDateFrom, setFilterDateFrom,
+    searchQuery, setSearchQuery,
     clearFilters,
   } = useInboxStore();
   const [showFilters, setShowFilters] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const workspaceId = useCurrentWorkspaceId();
+  const queryClient = useQueryClient();
+
+  // Manual refresh: trigger a server-side sync, then refetch threads/labels.
+  // Server skips integrations that synced very recently so this is cheap.
+  async function handleRefresh() {
+    if (!workspaceId || isSyncing) return;
+    setIsSyncing(true);
+    try {
+      const res = await fetch("/api/integrations/sync-all", {
+        method: "POST",
+        headers: { "x-workspace-id": workspaceId, "Content-Type": "application/json" },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.triggered > 0) {
+        toast.success(`Syncing ${data.triggered} integration${data.triggered === 1 ? "" : "s"}...`);
+      }
+      // Refetch what's already in the DB right now; sync result will land
+      // on the next 15s poll interval.
+      await Promise.all([
+        refetch(),
+        queryClient.invalidateQueries({ queryKey: ["labels", workspaceId] }),
+      ]);
+    } catch {
+      toast.error("Refresh failed");
+    } finally {
+      setIsSyncing(false);
+    }
+  }
 
   // Flatten all pages into single array
   const threads = useMemo(
@@ -67,14 +101,44 @@ export function ThreadList() {
 
   return (
     <div className="w-80 border-r flex flex-col h-full bg-muted/10">
-      {/* Header with filters */}
-      <div className="px-3 py-2 border-b">
+      {/* Header with search + filters */}
+      <div className="px-3 py-2 border-b space-y-2">
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search name, email, message…"
+            className="w-full pl-7 pr-7 py-1.5 text-xs rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">{viewTitle}</h2>
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-muted-foreground">
               {threads.length}{hasNextPage ? "+" : ""}
             </span>
+            <button
+              onClick={handleRefresh}
+              disabled={isSyncing}
+              className={cn(
+                "flex items-center justify-center w-6 h-6 rounded transition-colors",
+                "text-muted-foreground hover:text-foreground disabled:opacity-50"
+              )}
+              title="Pull latest from Instantly / HeyReach"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", isSyncing && "animate-spin")} />
+            </button>
             <button
               onClick={() => setShowFilters(!showFilters)}
               className={cn(

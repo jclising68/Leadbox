@@ -37,7 +37,7 @@ export default function PersonalDetailsPage() {
   const { data: profile, isLoading, isError } = useQuery<UserProfile>({
     queryKey: ["user-profile"],
     queryFn: async () => {
-      const res = await fetch("/api/user/profile");
+      const res = await fetch("/api/user/profile", { cache: "no-store" });
       if (!res.ok) throw new Error("Failed to fetch profile");
       return res.json();
     },

@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
+import { workspaceJson } from "@/lib/api-response";
 
 export async function GET(req: NextRequest) {
   const { error, workspaceId } = await requireWorkspaceAccess(req);
@@ -8,7 +9,7 @@ export async function GET(req: NextRequest) {
 
   const query = req.nextUrl.searchParams.get("q");
   if (!query || query.length < 2) {
-    return NextResponse.json({ threads: [] });
+    return workspaceJson({ threads: [] });
   }
 
   const threads = await prisma.thread.findMany({
@@ -47,5 +48,5 @@ export async function GET(req: NextRequest) {
     take: 20,
   });
 
-  return NextResponse.json({ threads });
+  return workspaceJson({ threads });
 }

@@ -1,71 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
-import { decrypt } from "@/lib/crypto";
-import { after } from "next/server";
+import { syncProviderTags } from "@/services/provider-tags";
 
-async function pushTagToProvider(
-  workspaceId: string,
-  threadId: string,
-  labelName: string
-) {
-  // Get thread with prospect info
-  const thread = await prisma.thread.findUnique({
-    where: { id: threadId },
-    include: {
-      prospect: { select: { email: true, linkedinUrl: true } },
-    },
-  });
-  if (!thread) return;
-
-  const provider = thread.channel === "EMAIL" ? "INSTANTLY" : "HEYREACH";
-  const integration = await prisma.integration.findFirst({
-    where: { workspaceId, provider, isActive: true },
-  });
-  if (!integration) return;
-
-  const apiKey = decrypt(
-    integration.apiKeyEncrypted,
-    integration.apiKeyIv,
-    integration.apiKeyTag
-  );
-
-  try {
-    if (provider === "INSTANTLY" && thread.prospect.email) {
-      // Push tag to Instantly lead
-      await fetch("https://api.instantly.ai/api/v2/leads/update", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: thread.prospect.email,
-          update: { tags: [labelName] },
-        }),
-      });
-    } else if (provider === "HEYREACH" && thread.prospect.linkedinUrl) {
-      // Push tag to HeyReach lead
-      await fetch("https://api.heyreach.io/api/public/Lead/AddTags", {
-        method: "POST",
-        headers: {
-          "X-API-KEY": apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          profileUrl: thread.prospect.linkedinUrl,
-          tags: [labelName],
-        }),
-      });
-    }
-  } catch (err) {
-    console.error(
-      `[labels] Failed to push tag "${labelName}" to ${provider}:`,
-      err instanceof Error ? err.message : err
-    );
-  }
-}
-
+/**
+ * Local DB op + provider push are awaited inline (not via `after()`) so the
+ * frontend toast can surface what the provider returned. The DB op succeeds
+ * first regardless — provider failure does not roll it back. Latency is ~1s.
+ */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ threadId: string }> }
@@ -99,10 +41,9 @@ export async function POST(
     include: { label: true },
   });
 
-  // Push tag to Instantly/HeyReach in background
-  after(() => pushTagToProvider(workspaceId!, threadId, label.name));
+  const providerSync = await syncProviderTags(workspaceId!, threadId);
 
-  return NextResponse.json(threadLabel);
+  return NextResponse.json({ ...threadLabel, providerSync });
 }
 
 export async function DELETE(
@@ -126,5 +67,7 @@ export async function DELETE(
     where: { threadId, labelId },
   });
 
-  return NextResponse.json({ success: true });
+  const providerSync = await syncProviderTags(workspaceId!, threadId);
+
+  return NextResponse.json({ success: true, providerSync });
 }

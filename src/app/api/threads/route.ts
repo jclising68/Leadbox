@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
+import { workspaceJson } from "@/lib/api-response";
 import type { Prisma } from "@prisma/client";
 
 export async function GET(req: NextRequest) {
@@ -90,14 +91,5 @@ export async function GET(req: NextRequest) {
   const data = hasMore ? threads.slice(0, limit) : threads;
   const nextCursor = hasMore ? data[data.length - 1].id : null;
 
-  const res = NextResponse.json({
-    threads: data,
-    nextCursor,
-    hasMore,
-  });
-
-  // Cache for 5s on client, allow stale for 10s while revalidating
-  res.headers.set("Cache-Control", "private, max-age=5, stale-while-revalidate=10");
-
-  return res;
+  return workspaceJson({ threads: data, nextCursor, hasMore });
 }

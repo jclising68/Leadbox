@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
+import { workspaceJson } from "@/lib/api-response";
 import type { Prisma } from "@prisma/client";
 
 export async function PATCH(req: NextRequest) {
@@ -178,7 +179,5 @@ export async function GET(req: NextRequest) {
   const data = hasMore ? prospects.slice(0, limit) : prospects;
   const nextCursor = hasMore ? data[data.length - 1].id : null;
 
-  const res = NextResponse.json({ prospects: data, nextCursor, hasMore });
-  res.headers.set("Cache-Control", "private, max-age=5, stale-while-revalidate=10");
-  return res;
+  return workspaceJson({ prospects: data, nextCursor, hasMore });
 }

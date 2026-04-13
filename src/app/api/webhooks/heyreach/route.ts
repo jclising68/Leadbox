@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { normalizeHeyreachWebhook } from "@/services/webhook-processor";
 import { resolveThread } from "@/services/thread-resolver";
@@ -85,10 +86,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Auto-classify inbound messages with AI
+    // Auto-classify inbound messages with AI. Use Next.js `after()` so the
+    // work runs under Vercel's `waitUntil` — a bare fire-and-forget .then()
+    // gets killed when the lambda returns the response, which is why AI
+    // labels sometimes never landed in production.
     if (normalized.direction === "INBOUND" && !normalized.sourceLabel) {
-      classifyMessage(workspaceId, message.id)
-        .then(async (result) => {
+      after(async () => {
+        try {
+          const result = await classifyMessage(workspaceId, message.id);
           if (result && result.confidence >= 0.7) {
             const labelName = classificationToLabelName(result.label);
             await applyAutoLabel(
@@ -99,8 +104,10 @@ export async function POST(req: NextRequest) {
               "AUTO_AI"
             );
           }
-        })
-        .catch(console.error);
+        } catch (err) {
+          console.error("[heyreach webhook] auto-classify failed:", err);
+        }
+      });
     }
 
     await prisma.webhookLog.update({

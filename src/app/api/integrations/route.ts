@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
+import { workspaceJson } from "@/lib/api-response";
 import { encrypt, maskApiKey, decrypt } from "@/lib/crypto";
 import { v4 as uuid } from "uuid";
 import { syncInstantly, testInstantlyConnection } from "@/services/instantly-sync";
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  return NextResponse.json(masked);
+  return workspaceJson(masked);
 }
 
 export async function POST(req: NextRequest) {

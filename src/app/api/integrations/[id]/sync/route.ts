@@ -5,6 +5,7 @@ import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
 import { after } from "next/server";
+import { workspaceJson } from "@/lib/api-response";
 
 // Check if a sync is already running (DB-backed, serverless-safe)
 async function isSyncRunning(integrationId: string): Promise<boolean> {
@@ -144,7 +145,7 @@ export async function GET(
 
   const config = (integration.config as Record<string, unknown>) ?? {};
 
-  return NextResponse.json({
+  return workspaceJson({
     syncing: !!config.syncRunning,
     lastSyncAt: integration.lastSyncAt,
   });

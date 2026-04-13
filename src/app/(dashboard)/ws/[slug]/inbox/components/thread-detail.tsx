@@ -92,7 +92,7 @@ function ProviderBadge({ provider }: { provider?: string | null }) {
 
 export function ThreadDetail() {
   const { selectedThreadId, setSelectedThread } = useInboxStore();
-  const { data: thread, isLoading } = useThread(selectedThreadId);
+  const { data: thread, isLoading, refetch: refetchThread, isFetching: isRefetchingThread } = useThread(selectedThreadId);
   const { data: labels } = useLabels();
   const updateThread = useUpdateThread();
   const addLabel = useAddLabel();
@@ -468,7 +468,15 @@ export function ThreadDetail() {
       <div className="w-72 border-l bg-muted/10 flex flex-col h-full overflow-hidden shrink-0">
         <div className="px-4 py-3 border-b flex items-center justify-between shrink-0">
           <h3 className="text-sm font-semibold">Prospect details</h3>
-          <RotateCcw className="h-3.5 w-3.5 text-muted-foreground cursor-pointer" />
+          <button
+            type="button"
+            onClick={() => refetchThread()}
+            disabled={isRefetchingThread}
+            title="Refresh prospect details"
+            className="text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+          >
+            <RotateCcw className={cn("h-3.5 w-3.5", isRefetchingThread && "animate-spin")} />
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto min-h-0">

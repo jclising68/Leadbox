@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,7 +37,7 @@ function headers(wId: string) {
 }
 
 export default function MembersPage() {
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaceId = useCurrentWorkspaceId();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
@@ -48,6 +48,7 @@ export default function MembersPage() {
     queryFn: async () => {
       const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
         headers: headers(workspaceId!),
+        cache: "no-store",
       });
       return res.json();
     },

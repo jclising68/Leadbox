@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
+import { workspaceJson } from "@/lib/api-response";
 
 export async function GET(_req: NextRequest) {
   const session = await auth();
@@ -30,7 +31,7 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  return NextResponse.json({
+  return workspaceJson({
     id: dbUser.id,
     email: dbUser.email,
     name: dbUser.name,

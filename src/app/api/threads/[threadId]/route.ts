@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
+import { workspaceJson } from "@/lib/api-response";
 
 export async function GET(
   req: NextRequest,
@@ -27,7 +28,7 @@ export async function GET(
     return NextResponse.json({ error: "Thread not found" }, { status: 404 });
   }
 
-  return NextResponse.json(thread);
+  return workspaceJson(thread);
 }
 
 export async function PATCH(

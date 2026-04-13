@@ -49,7 +49,9 @@ export async function resolveThread(
     }
   }
 
-  // 3. Check for duplicate message
+  // 3. If we've already seen this message, refresh its rawPayload (sync code
+  // may have started persisting new fields like linkedInAccountId that older
+  // rows don't have). Don't touch immutable fields like direction or sentAt.
   if (payload.externalId) {
     const existing = await prisma.message.findUnique({
       where: {
@@ -60,7 +62,58 @@ export async function resolveThread(
       },
     });
     if (existing) {
-      return { prospect, thread, message: existing, isNewThread: false };
+      const refreshed = await prisma.message.update({
+        where: { id: existing.id },
+        data: {
+          rawPayload: payload.rawPayload as object,
+          campaignId: existing.campaignId ?? payload.campaignId,
+          campaignName: existing.campaignName ?? payload.campaignName,
+        },
+      });
+      return { prospect, thread, message: refreshed, isNewThread: false };
+    }
+  }
+
+  // 3b. Reconcile optimistic local rows. When a user replies from LeadBox,
+  // `heyreach-reply.ts` / `instantly-reply.ts` insert an immediate row with a
+  // fabricated externalId (`hr_reply_*` / `reply_*`) so the UI feels fast.
+  // When the next sync pulls the provider's authoritative copy back, the
+  // externalIds won't match — without reconciliation we'd end up with two
+  // rows for the same outbound send. Match on thread+direction+body within
+  // a short window and upgrade the optimistic row in place.
+  if (
+    payload.direction === "OUTBOUND" &&
+    payload.externalId &&
+    (payload.messageText || payload.bodyText)
+  ) {
+    const body = (payload.messageText || payload.bodyText || "").trim();
+    if (body.length > 0) {
+      const windowStart = new Date(
+        (payload.sentAt?.getTime() || Date.now()) - 30 * 60 * 1000
+      );
+      const optimistic = await prisma.message.findFirst({
+        where: {
+          threadId: thread.id,
+          direction: "OUTBOUND",
+          externalId: { startsWith: payload.channel === "LINKEDIN" ? "hr_reply_" : "reply_" },
+          OR: [{ messageText: body }, { bodyText: body }],
+          sentAt: { gte: windowStart },
+        },
+        orderBy: { sentAt: "desc" },
+      });
+      if (optimistic) {
+        const reconciled = await prisma.message.update({
+          where: { id: optimistic.id },
+          data: {
+            externalId: payload.externalId,
+            rawPayload: payload.rawPayload as object,
+            campaignId: optimistic.campaignId ?? payload.campaignId,
+            campaignName: optimistic.campaignName ?? payload.campaignName,
+            sentAt: payload.sentAt ?? optimistic.sentAt,
+          },
+        });
+        return { prospect, thread, message: reconciled, isNewThread: false };
+      }
     }
   }
 

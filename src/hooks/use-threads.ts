@@ -1,9 +1,23 @@
 "use client";
 
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { useInboxStore } from "@/stores/inbox-store";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
+
+type ProviderSyncResult =
+  | { ok: true; provider: "INSTANTLY" | "HEYREACH"; tagCount: number }
+  | { ok: false; provider: "INSTANTLY" | "HEYREACH" | "NONE"; error: string };
+
+function reportProviderSync(result?: ProviderSyncResult) {
+  if (!result) return;
+  if (result.ok) {
+    toast.success(`Synced to ${result.provider === "INSTANTLY" ? "Instantly" : "HeyReach"}`);
+  } else {
+    toast.error(`${result.provider} sync failed: ${result.error}`);
+  }
+}
 
 function buildHeaders(workspaceId: string) {
   return { "x-workspace-id": workspaceId, "Content-Type": "application/json" };
@@ -20,7 +34,7 @@ function useDebounce(value: string, delay: number) {
 }
 
 export function useThreads() {
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaceId = useCurrentWorkspaceId();
   const { view, selectedLabelId, searchQuery, filterChannel, filterUnread, filterDateFrom } = useInboxStore();
   const debouncedSearch = useDebounce(searchQuery, 300);
 
@@ -42,6 +56,7 @@ export function useThreads() {
 
       const res = await fetch(`/api/threads?${params}`, {
         headers: buildHeaders(workspaceId),
+        cache: "no-store",
       });
       if (!res.ok) throw new Error("Failed to fetch threads");
       return res.json();
@@ -56,7 +71,7 @@ export function useThreads() {
 }
 
 export function useThread(threadId: string | null) {
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaceId = useCurrentWorkspaceId();
 
   return useQuery({
     queryKey: ["thread", threadId, workspaceId],
@@ -64,6 +79,7 @@ export function useThread(threadId: string | null) {
       if (!workspaceId || !threadId) return null;
       const res = await fetch(`/api/threads/${threadId}`, {
         headers: buildHeaders(workspaceId),
+        cache: "no-store",
       });
       if (!res.ok) throw new Error("Failed to fetch thread");
       return res.json();
@@ -76,7 +92,7 @@ export function useThread(threadId: string | null) {
 
 export function useUpdateThread() {
   const queryClient = useQueryClient();
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaceId = useCurrentWorkspaceId();
 
   return useMutation({
     mutationFn: async ({
@@ -103,7 +119,7 @@ export function useUpdateThread() {
 
 export function useAddLabel() {
   const queryClient = useQueryClient();
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaceId = useCurrentWorkspaceId();
 
   return useMutation({
     mutationFn: async ({ threadId, labelId }: { threadId: string; labelId: string }) => {
@@ -113,19 +129,20 @@ export function useAddLabel() {
         body: JSON.stringify({ labelId }),
       });
       if (!res.ok) throw new Error("Failed to add label");
-      return res.json();
+      return res.json() as Promise<{ providerSync?: ProviderSyncResult }>;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["threads"] });
       queryClient.invalidateQueries({ queryKey: ["thread"] });
       queryClient.invalidateQueries({ queryKey: ["labels"] });
+      reportProviderSync(data.providerSync);
     },
   });
 }
 
 export function useRemoveLabel() {
   const queryClient = useQueryClient();
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaceId = useCurrentWorkspaceId();
 
   return useMutation({
     mutationFn: async ({ threadId, labelId }: { threadId: string; labelId: string }) => {
@@ -135,19 +152,20 @@ export function useRemoveLabel() {
         body: JSON.stringify({ labelId }),
       });
       if (!res.ok) throw new Error("Failed to remove label");
-      return res.json();
+      return res.json() as Promise<{ providerSync?: ProviderSyncResult }>;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["threads"] });
       queryClient.invalidateQueries({ queryKey: ["thread"] });
       queryClient.invalidateQueries({ queryKey: ["labels"] });
+      reportProviderSync(data.providerSync);
     },
   });
 }
 
 export function useSendReply() {
   const queryClient = useQueryClient();
-  const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const workspaceId = useCurrentWorkspaceId();
 
   return useMutation({
     mutationFn: async ({ threadId, body }: { threadId: string; body: string }) => {

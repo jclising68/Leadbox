@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { normalizeInstantlyWebhook } from "@/services/webhook-processor";
 import { resolveThread } from "@/services/thread-resolver";
@@ -75,24 +76,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Auto-classify inbound messages with AI
-    if (
-      normalized.direction === "INBOUND" &&
-      !normalized.sourceLabel
-    ) {
-      // Run classification async (don't block webhook response)
-      classifyMessage(workspaceId, message.id).then(async (result) => {
-        if (result && result.confidence >= 0.7) {
-          const labelName = classificationToLabelName(result.label);
-          await applyAutoLabel(
-            workspaceId,
-            thread.id,
-            labelName,
-            result.confidence,
-            "AUTO_AI"
-          );
+    // Auto-classify inbound messages with AI. Use Next.js `after()` so the
+    // work runs under Vercel's `waitUntil` — a bare fire-and-forget .then()
+    // gets killed when the lambda returns the response, which is why AI
+    // labels sometimes never landed in production.
+    if (normalized.direction === "INBOUND" && !normalized.sourceLabel) {
+      after(async () => {
+        try {
+          const result = await classifyMessage(workspaceId, message.id);
+          if (result && result.confidence >= 0.7) {
+            const labelName = classificationToLabelName(result.label);
+            await applyAutoLabel(
+              workspaceId,
+              thread.id,
+              labelName,
+              result.confidence,
+              "AUTO_AI"
+            );
+          }
+        } catch (err) {
+          console.error("[instantly webhook] auto-classify failed:", err);
         }
-      }).catch(console.error);
+      });
     }
 
     // Update log
