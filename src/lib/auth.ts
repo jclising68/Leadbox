@@ -7,6 +7,15 @@ import bcrypt from "bcryptjs";
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
   session: { strategy: "jwt" },
+  // Vercel gives each deployment its own URL (production alias
+  // `leadbox-phi.vercel.app`, preview URLs like `leadbox-qrwuas75t-...`,
+  // plus any custom domains). `trustHost: true` tells NextAuth to derive
+  // the canonical host from the request itself instead of hard-coding
+  // AUTH_URL, so cookies + redirects work on *every* URL the app is
+  // reachable at. Without this, sign-in hangs on "Signing in..." because
+  // NextAuth refuses to set the session cookie when the request host
+  // doesn't exactly match AUTH_URL.
+  trustHost: true,
   pages: {
     signIn: "/login",
   },
