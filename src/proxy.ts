@@ -14,8 +14,14 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Public auth pages — anyone (logged in or not) can reach these without
+  // being bounced to /login by the guard below. Forgot-password and
+  // reset-password must be here so users who can't log in can still recover.
   const isAuthPage =
-    pathname.startsWith("/login") || pathname.startsWith("/register");
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/register") ||
+    pathname.startsWith("/forgot-password") ||
+    pathname.startsWith("/reset-password");
 
   // Use JWT token check (lightweight, no DB query) instead of auth() wrapper
   const token = await getToken({
