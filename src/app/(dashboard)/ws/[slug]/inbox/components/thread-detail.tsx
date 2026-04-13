@@ -338,8 +338,21 @@ export function ThreadDetail() {
                 receivedAt: string;
                 integration: { name: string; provider: string } | null;
               }) => (
-                <div key={msg.id} className="group">
-                  <div className="flex items-center gap-3 mb-2">
+                <div
+                  key={msg.id}
+                  className={cn(
+                    "group flex flex-col",
+                    msg.direction === "INBOUND" ? "items-start" : "items-end"
+                  )}
+                >
+                  {/* Header: sender + timestamp. Order flips per side so the
+                      avatar always sits on the outside (classic chat layout). */}
+                  <div
+                    className={cn(
+                      "flex items-center gap-3 mb-2 max-w-[80%]",
+                      msg.direction === "INBOUND" ? "flex-row" : "flex-row-reverse"
+                    )}
+                  >
                     {msg.direction === "INBOUND" ? (
                       <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0">
                         <span className="text-xs font-medium text-blue-500">
@@ -347,12 +360,17 @@ export function ThreadDetail() {
                         </span>
                       </div>
                     ) : (
-                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0">
-                        <span className="text-xs font-medium text-muted-foreground">You</span>
+                      <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+                        <span className="text-xs font-medium text-primary">You</span>
                       </div>
                     )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                    <div className={cn("min-w-0", msg.direction === "INBOUND" ? "text-left" : "text-right")}>
+                      <div
+                        className={cn(
+                          "flex items-center gap-2",
+                          msg.direction === "INBOUND" ? "" : "flex-row-reverse"
+                        )}
+                      >
                         <span className="text-sm font-medium">
                           {msg.direction === "INBOUND" ? prospectName : (msg.fromEmail || "You")}
                         </span>
@@ -372,12 +390,17 @@ export function ThreadDetail() {
                     </span>
                   </div>
 
-                  <div className={cn(
-                    "rounded-lg px-4 py-3 text-sm leading-relaxed",
-                    msg.direction === "INBOUND"
-                      ? "bg-blue-500/10 ml-11"
-                      : "bg-muted/60 ml-11"
-                  )}>
+                  {/* Bubble: prospect = blue-tinted on the left; us = primary
+                      tint on the right. Caps at 80% width so long messages
+                      wrap instead of spanning the whole pane. */}
+                  <div
+                    className={cn(
+                      "rounded-2xl px-4 py-3 text-sm leading-relaxed max-w-[80%]",
+                      msg.direction === "INBOUND"
+                        ? "bg-blue-500/10 rounded-tl-sm ml-11"
+                        : "bg-primary/10 rounded-tr-sm mr-11"
+                    )}
+                  >
                     <div className="whitespace-pre-wrap break-words">
                       {msg.bodyText || msg.messageText || msg.subject || "No content"}
                     </div>
