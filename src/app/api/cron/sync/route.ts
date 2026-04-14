@@ -4,7 +4,8 @@ import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
 
-const MAX_DURATION_MS = 55_000; // Stay under 60s Vercel Hobby limit
+export const maxDuration = 60;
+const MAX_DURATION_MS = 55_000; // Stay under 60s Vercel limit
 
 export async function GET(req: NextRequest) {
   // Verify cron secret

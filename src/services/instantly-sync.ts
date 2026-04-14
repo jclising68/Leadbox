@@ -5,7 +5,7 @@ import type { NormalizedWebhookPayload } from "@/types";
 
 const INSTANTLY_API_BASE = "https://api.instantly.ai/api/v2";
 const PAGE_SIZE = 100;
-const MIN_REQUEST_GAP_MS = 3500; // ~17 requests/min, safely under the 20/min limit
+const MIN_REQUEST_GAP_MS = 1000; // 1 request/sec — safely under Instantly v2 rate limits
 
 type InstantlyEmail = {
   id: string;

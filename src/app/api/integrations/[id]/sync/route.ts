@@ -7,6 +7,9 @@ import { enrichFromInstantly } from "@/services/lead-enrichment";
 import { after } from "next/server";
 import { workspaceJson } from "@/lib/api-response";
 
+// Allow up to 60s for the after() sync work (Vercel Hobby max)
+export const maxDuration = 60;
+
 // Check if a sync is already running (DB-backed, serverless-safe)
 async function isSyncRunning(integrationId: string): Promise<boolean> {
   const integration = await prisma.integration.findUnique({
