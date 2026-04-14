@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/send-email";
 import { createSupabaseAdmin } from "@/lib/supabase-server";
+import { rateLimit } from "@/lib/rate-limit";
 
 /**
  * Start a password reset. We ALWAYS return 200 with a generic message —
@@ -11,6 +12,19 @@ import { createSupabaseAdmin } from "@/lib/supabase-server";
  * or Resend (fallback).
  */
 export async function POST(req: NextRequest) {
+  // Rate limit: 3 per email per hour, 10 per IP per hour
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const { allowed: ipAllowed } = rateLimit(`forgot-ip:${ip}`, {
+    maxAttempts: 10,
+    windowMs: 60 * 60 * 1000,
+  });
+  if (!ipAllowed) {
+    return NextResponse.json(
+      { error: "Too many attempts. Please try again later." },
+      { status: 429 }
+    );
+  }
+
   let email: string;
   try {
     const body = (await req.json()) as { email?: string };
@@ -24,6 +38,19 @@ export async function POST(req: NextRequest) {
       { error: "Please enter a valid email address" },
       { status: 400 }
     );
+  }
+
+  const { allowed: emailAllowed } = rateLimit(`forgot-email:${email}`, {
+    maxAttempts: 3,
+    windowMs: 60 * 60 * 1000,
+  });
+  if (!emailAllowed) {
+    // Return generic success to avoid email enumeration
+    return NextResponse.json({
+      ok: true,
+      message:
+        "If an account exists for that email, you'll receive a password-reset link shortly.",
+    });
   }
 
   const genericSuccess = NextResponse.json({
@@ -110,9 +137,15 @@ this email — your password won't change.
 
   const result = await sendEmail({ to: email, subject, html, text });
   if (!result.sent) {
-    console.warn(
-      `[forgot-password] Token created but email not sent for ${email} (reason: ${result.error}). Reset URL: ${resetUrl}`
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.warn(
+        `[forgot-password] Token created but email not sent for ${email} (reason: ${result.error}). Reset URL: ${resetUrl}`
+      );
+    } else {
+      console.warn(
+        `[forgot-password] Token created but email not sent for ${email} (reason: ${result.error})`
+      );
+    }
   }
 
   return genericSuccess;

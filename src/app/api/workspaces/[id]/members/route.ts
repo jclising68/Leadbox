@@ -51,11 +51,15 @@ export async function POST(
     );
   }
 
+  // Validate role — ADMIN cannot assign OWNER
+  const allowedRoles = ["ADMIN", "MEMBER", "VIEWER"];
+  const assignRole = role && allowedRoles.includes(role) ? role : "MEMBER";
+
   const member = await prisma.workspaceMember.create({
     data: {
       userId: user.id,
       workspaceId: workspaceId!,
-      role: role || "MEMBER",
+      role: assignRole,
     },
     include: {
       user: { select: { id: true, email: true, name: true } },
@@ -74,8 +78,24 @@ export async function DELETE(
 
   const { userId } = await req.json();
 
-  await prisma.workspaceMember.deleteMany({
-    where: { userId, workspaceId: workspaceId! },
+  // Prevent removing OWNER from the workspace
+  const target = await prisma.workspaceMember.findUnique({
+    where: { userId_workspaceId: { userId, workspaceId: workspaceId! } },
+  });
+
+  if (!target) {
+    return NextResponse.json({ error: "Member not found" }, { status: 404 });
+  }
+
+  if (target.role === "OWNER") {
+    return NextResponse.json(
+      { error: "Cannot remove the workspace owner" },
+      { status: 403 }
+    );
+  }
+
+  await prisma.workspaceMember.delete({
+    where: { id: target.id },
   });
 
   return NextResponse.json({ success: true });

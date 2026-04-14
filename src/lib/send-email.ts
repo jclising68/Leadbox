@@ -20,10 +20,16 @@ export async function sendEmail({
   const from = process.env.EMAIL_FROM || "LeadBox <onboarding@resend.dev>";
 
   if (!apiKey) {
-    console.warn(
-      `[send-email] RESEND_API_KEY not set — would have emailed ${to}. Subject: ${subject}`
-    );
-    console.warn(`[send-email] Body preview:\n${text || html}`);
+    if (process.env.NODE_ENV === "development") {
+      console.warn(
+        `[send-email] RESEND_API_KEY not set — would have emailed ${to}. Subject: ${subject}`
+      );
+      console.warn(`[send-email] Body preview:\n${text || html}`);
+    } else {
+      console.warn(
+        `[send-email] RESEND_API_KEY not set — email to ${to} not sent. Subject: ${subject}`
+      );
+    }
     return { sent: false, error: "email service not configured" };
   }
 

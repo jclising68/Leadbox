@@ -8,11 +8,16 @@ export const maxDuration = 60;
 const MAX_DURATION_MS = 55_000; // Stay under 60s Vercel limit
 
 export async function GET(req: NextRequest) {
-  // Verify cron secret
+  // Verify cron secret — fail closed if not configured
   const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret) {
+    console.error("[cron] CRON_SECRET not configured — rejecting request");
+    return NextResponse.json({ error: "CRON_SECRET not configured" }, { status: 500 });
+  }
+
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -33,18 +38,34 @@ export async function GET(req: NextRequest) {
       break;
     }
 
-    // Skip if manual sync is running
+    // Skip if manual sync is running (but recover stale locks > 5 min)
     const config = (integration.config as Record<string, unknown>) ?? {};
     if (config.syncRunning) {
-      console.log(`[cron] Skipping ${integration.id} — manual sync running`);
-      continue;
+      const startedAt = config.syncStartedAt as string | undefined;
+      const elapsed = startedAt ? Date.now() - new Date(startedAt).getTime() : Infinity;
+      if (elapsed < 5 * 60 * 1000) {
+        console.log(`[cron] Skipping ${integration.id} — manual sync running`);
+        continue;
+      }
+      // Stale lock — clean it up
+      console.log(`[cron] Clearing stale sync lock on ${integration.id} (${Math.round(elapsed / 1000)}s old)`);
+      const c = { ...config };
+      delete c.syncRunning;
+      delete c.syncStartedAt;
+      await prisma.integration.update({
+        where: { id: integration.id },
+        data: { config: c as object },
+      });
     }
 
     try {
-      console.log(`[cron] Syncing ${integration.provider} integration ${integration.id}...`);
+      // Give each integration a share of remaining time
+      const remaining = MAX_DURATION_MS - (Date.now() - startTime);
+      const perIntegrationBudget = Math.min(remaining, 25_000); // Max 25s per integration
+      console.log(`[cron] Syncing ${integration.provider} integration ${integration.id} (budget: ${Math.round(perIntegrationBudget / 1000)}s)...`);
 
       const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
-      const result = await syncFn(integration.id);
+      const result = await syncFn(integration.id, perIntegrationBudget);
 
       results.push({
         id: integration.id,

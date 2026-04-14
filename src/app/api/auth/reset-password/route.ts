@@ -39,18 +39,28 @@ export async function POST(req: NextRequest) {
   if (body.supabaseFlow && body.email) {
     const email = body.email.trim().toLowerCase();
 
-    // Verify via Supabase access token if service role key is available
+    // Verify via Supabase access token — REQUIRED for supabaseFlow
     if (body.supabaseToken) {
       const supabase = createSupabaseAdmin();
-      if (supabase) {
-        const { data, error } = await supabase.auth.getUser(body.supabaseToken);
-        if (error || data.user?.email?.toLowerCase() !== email) {
-          return NextResponse.json(
-            { error: "Invalid recovery session" },
-            { status: 401 }
-          );
-        }
+      if (!supabase) {
+        return NextResponse.json(
+          { error: "Recovery service unavailable" },
+          { status: 500 }
+        );
       }
+      const { data, error } = await supabase.auth.getUser(body.supabaseToken);
+      if (error || data.user?.email?.toLowerCase() !== email) {
+        return NextResponse.json(
+          { error: "Invalid recovery session" },
+          { status: 401 }
+        );
+      }
+    } else {
+      // supabaseFlow without a token is not allowed
+      return NextResponse.json(
+        { error: "Invalid recovery session" },
+        { status: 401 }
+      );
     }
 
     // Secondary check: a VerificationToken must exist for this email

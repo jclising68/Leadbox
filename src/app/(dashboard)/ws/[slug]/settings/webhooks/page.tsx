@@ -19,9 +19,9 @@ export default function WebhooksPage() {
   const { data: logs, isLoading } = useQuery({
     queryKey: ["webhook-logs", workspaceId],
     queryFn: async () => {
-      const res = await fetch(
-        `/api/webhooks/logs?workspace_id=${workspaceId}`
-      );
+      const res = await fetch("/api/webhooks/logs", {
+        headers: { "x-workspace-id": workspaceId! },
+      });
       if (!res.ok) return [];
       return res.json();
     },
