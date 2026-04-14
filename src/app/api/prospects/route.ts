@@ -150,6 +150,7 @@ export async function GET(req: NextRequest) {
     sourceDate: { sourceDate: sortDir },
     email: { email: sortDir },
     firstName: { firstName: sortDir },
+    lastName: { lastName: sortDir },
     company: { company: sortDir },
     domain: { domain: sortDir },
   };

@@ -12,6 +12,10 @@ export async function GET(req: NextRequest) {
     return workspaceJson({ threads: [] });
   }
 
+  // Search on prospect fields and thread snippet only.
+  // Message body search (bodyText/messageText) was removed because
+  // ILIKE '%term%' on large text columns causes sequential scans at scale.
+  // TODO: Add pg_trgm GIN indexes or Supabase FTS for message body search.
   const threads = await prisma.thread.findMany({
     where: {
       workspaceId: workspaceId!,
@@ -27,21 +31,15 @@ export async function GET(req: NextRequest) {
             ],
           },
         },
-        {
-          messages: {
-            some: {
-              OR: [
-                { subject: { contains: query, mode: "insensitive" } },
-                { bodyText: { contains: query, mode: "insensitive" } },
-                { messageText: { contains: query, mode: "insensitive" } },
-              ],
-            },
-          },
-        },
       ],
     },
     include: {
-      prospect: true,
+      prospect: {
+        select: {
+          id: true, email: true, firstName: true, lastName: true,
+          company: true, domain: true, linkedinUrl: true,
+        },
+      },
       threadLabels: { include: { label: true } },
     },
     orderBy: { lastMessageAt: "desc" },

@@ -143,6 +143,37 @@ export async function enrichFromInstantly(integrationId: string): Promise<{
   let enriched = 0;
   let errors = 0;
 
+  // Pre-fetch all prospects and labels for this workspace to avoid N+1 queries.
+  // This turns thousands of individual DB calls into 2 bulk queries.
+  const allProspects = await prisma.prospect.findMany({
+    where: { workspaceId },
+    select: {
+      id: true, email: true, notes: true,
+      thread: {
+        select: {
+          id: true,
+          messages: {
+            where: { direction: "INBOUND" },
+            orderBy: { sentAt: "desc" },
+            take: 1,
+            select: { bodyText: true, messageText: true },
+          },
+        },
+      },
+    },
+  });
+  const prospectByEmail = new Map(
+    allProspects.filter((p) => p.email).map((p) => [p.email!.toLowerCase(), p])
+  );
+
+  const allLabels = await prisma.label.findMany({
+    where: { workspaceId },
+    select: { id: true, name: true },
+  });
+  const labelByName = new Map(
+    allLabels.map((l) => [l.name.toLowerCase(), l])
+  );
+
   // 2. For each campaign, fetch all leads
   for (const campaign of campaigns) {
     let startingAfter: string | undefined;
@@ -201,25 +232,8 @@ export async function enrichFromInstantly(integrationId: string): Promise<{
               updateData.phone = updateData.phone || (payload.phone || payload.Phone || payload.phoneNumber) as string;
             }
 
-            // Populate notes with lead's latest reply text
-            const prospect = await prisma.prospect.findUnique({
-              where: { workspaceId_email: { workspaceId, email: lead.email } },
-              select: {
-                id: true,
-                notes: true,
-                thread: {
-                  select: {
-                    id: true,
-                    messages: {
-                      where: { direction: "INBOUND" },
-                      orderBy: { sentAt: "desc" },
-                      take: 1,
-                      select: { bodyText: true, messageText: true },
-                    },
-                  },
-                },
-              },
-            });
+            // Use pre-fetched prospect data instead of per-lead DB query
+            const prospect = prospectByEmail.get(lead.email.toLowerCase());
 
             // Set notes to latest reply if not already set
             if (prospect && !prospect.notes) {
@@ -232,8 +246,8 @@ export async function enrichFromInstantly(integrationId: string): Promise<{
               }
             }
 
-            // Only update if we have something new
-            if (Object.keys(updateData).length > 0) {
+            // Only update if we have something new and prospect exists
+            if (Object.keys(updateData).length > 0 && prospect) {
               await prisma.prospect.update({
                 where: { workspaceId_email: { workspaceId, email: lead.email } },
                 data: updateData,
@@ -241,30 +255,22 @@ export async function enrichFromInstantly(integrationId: string): Promise<{
               enriched++;
             }
 
-            // Also apply the lead status as a label if it exists
-            if (interestLabel) {
-              const prospect = await prisma.prospect.findUnique({
-                where: { workspaceId_email: { workspaceId, email: lead.email } },
-                select: { thread: { select: { id: true } } },
-              });
-              if (prospect?.thread) {
-                const label = await prisma.label.findFirst({
-                  where: { workspaceId, name: interestLabel },
+            // Apply interest label using pre-fetched label map
+            if (interestLabel && prospect?.thread) {
+              const label = labelByName.get(interestLabel.toLowerCase());
+              if (label) {
+                await prisma.threadLabel.upsert({
+                  where: {
+                    threadId_labelId: { threadId: prospect.thread.id, labelId: label.id },
+                  },
+                  create: {
+                    threadId: prospect.thread.id,
+                    labelId: label.id,
+                    source: "WEBHOOK",
+                    confidence: 1.0,
+                  },
+                  update: {},
                 });
-                if (label) {
-                  await prisma.threadLabel.upsert({
-                    where: {
-                      threadId_labelId: { threadId: prospect.thread.id, labelId: label.id },
-                    },
-                    create: {
-                      threadId: prospect.thread.id,
-                      labelId: label.id,
-                      source: "WEBHOOK",
-                      confidence: 1.0,
-                    },
-                    update: {},
-                  });
-                }
               }
             }
           } catch {

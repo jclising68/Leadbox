@@ -49,6 +49,10 @@ export async function GET(req: NextRequest) {
   }
 
   if (search) {
+    // Search on prospect fields and thread snippet only.
+    // Full-text search on message body (bodyText/messageText) was removed
+    // because ILIKE '%term%' on large text columns causes sequential scans.
+    // TODO: Add pg_trgm GIN indexes or Supabase FTS for message body search.
     where.OR = [
       { snippet: { contains: search, mode: "insensitive" } },
       {
@@ -59,17 +63,6 @@ export async function GET(req: NextRequest) {
             { lastName: { contains: search, mode: "insensitive" } },
             { company: { contains: search, mode: "insensitive" } },
           ],
-        },
-      },
-      {
-        messages: {
-          some: {
-            OR: [
-              { subject: { contains: search, mode: "insensitive" } },
-              { bodyText: { contains: search, mode: "insensitive" } },
-              { messageText: { contains: search, mode: "insensitive" } },
-            ],
-          },
         },
       },
     ];

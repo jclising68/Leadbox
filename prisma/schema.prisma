@@ -154,7 +154,8 @@ model Prospect {
   @@index([workspaceId])
   @@index([workspaceId, company])
   @@index([workspaceId, updatedAt])
-  @@index([domain])
+  @@index([workspaceId, domain])
+  @@index([workspaceId, leadStatus])
 }
 
 model Thread {
@@ -223,7 +224,10 @@ model Message {
 
   @@unique([externalId, workspaceId])
   @@index([threadId, receivedAt])
+  @@index([threadId, direction, sentAt])
+  @@index([threadId, sentAt])
   @@index([workspaceId, receivedAt])
+  @@index([workspaceId, externalId])
   @@index([integrationId, sentAt])
   @@index([campaignId])
 }

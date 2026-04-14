@@ -19,6 +19,7 @@ export async function GET(
       threadLabels: { include: { label: true } },
       messages: {
         orderBy: { sentAt: "asc" },
+        take: 200,
         include: { integration: { select: { name: true, provider: true } } },
       },
     },

@@ -43,7 +43,7 @@ const COLUMNS = [
   { key: "date", label: "Date", w: 95, sortable: true, sortField: "lastMessageAt" },
   { key: "source", label: "", w: 32, sortable: false, sortField: "" },
   { key: "firstName", label: "First Name", w: 110, sortable: true, sortField: "firstName" },
-  { key: "lastName", label: "Last Name", w: 110, sortable: true, sortField: "firstName" },
+  { key: "lastName", label: "Last Name", w: 110, sortable: true, sortField: "lastName" },
   { key: "email", label: "Email", w: 200, sortable: true, sortField: "email" },
   { key: "phone", label: "Phone", w: 120, sortable: false, sortField: "" },
   { key: "title", label: "Title", w: 140, sortable: false, sortField: "" },
