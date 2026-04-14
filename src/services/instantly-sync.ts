@@ -229,14 +229,16 @@ export async function syncInstantly(
   const campaignMap = await fetchCampaigns(apiKey);
   console.log(`[sync] Found ${campaignMap.size} campaigns`);
 
-  // Batch dedup — fetch existing externalIds from recent messages only.
-  // Limiting to last 90 days avoids loading the entire message table into memory.
+  // Batch dedup — fetch existing externalIds from recent Instantly messages only.
+  // Filter out HeyReach IDs (prefixed "hr_") so each provider scopes to its own,
+  // and limit to last 90 days to avoid loading the entire table into memory.
   const dedupCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
   const existingIds = new Set(
     (await prisma.message.findMany({
       where: {
         workspaceId,
         externalId: { not: null },
+        NOT: { externalId: { startsWith: "hr_" } },
         receivedAt: { gte: dedupCutoff },
       },
       select: { externalId: true },
