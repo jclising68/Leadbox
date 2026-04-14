@@ -101,6 +101,11 @@ export function ThreadDetail() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [replyText, setReplyText] = useState("");
 
+  // Clear reply draft when switching threads
+  useEffect(() => {
+    setReplyText("");
+  }, [selectedThreadId]);
+
   // Mark as read when viewing
   useEffect(() => {
     if (thread?.isUnread && selectedThreadId) {
@@ -162,7 +167,7 @@ export function ThreadDetail() {
           <div className="flex items-center gap-1">
             <Button
               variant="ghost" size="icon" className="h-7 w-7" title="Refresh"
-              onClick={() => window.location.reload()}
+              onClick={() => refetchThread()}
             >
               <RotateCcw className="h-3.5 w-3.5" />
             </Button>

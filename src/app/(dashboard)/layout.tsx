@@ -36,11 +36,18 @@ export default function DashboardLayout({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: "My Workspace" }),
       })
-        .then((r) => r.json())
+        .then((r) => {
+          if (!r.ok) throw new Error("Failed to create workspace");
+          return r.json();
+        })
         .then((ws) => {
           setActiveWorkspace(ws.id);
           setCreating(false);
           router.replace(`/ws/${ws.slug}/inbox`);
+        })
+        .catch((err) => {
+          console.error("[dashboard] Workspace creation failed:", err);
+          setCreating(false);
         });
       return;
     }
