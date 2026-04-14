@@ -78,13 +78,29 @@ async function rateLimitedFetch(apiKey: string, path: string, params?: Record<st
   throw new Error("Instantly API failed after retries");
 }
 
-async function fetchAllEmails(apiKey: string): Promise<InstantlyEmail[]> {
+async function fetchEmailsIncremental(
+  apiKey: string,
+  existingIds: Set<string>,
+  timeBudgetMs: number,
+  startTime: number,
+): Promise<{ emails: InstantlyEmail[]; exhausted: boolean }> {
   const allEmails: InstantlyEmail[] = [];
   let cursor: string | undefined;
   let page = 0;
+  let exhausted = true; // true = we fetched everything (no early exit)
 
   while (true) {
-    const params: Record<string, string> = { limit: String(PAGE_SIZE) };
+    // Time-budget check — leave room for processing
+    if (Date.now() - startTime > timeBudgetMs * 0.5) {
+      console.log(`[sync] Fetch phase hit 50% time budget after ${page} pages, proceeding to process`);
+      exhausted = false;
+      break;
+    }
+
+    const params: Record<string, string> = {
+      limit: String(PAGE_SIZE),
+      sort_order: "desc", // Newest first — so we can stop early
+    };
     if (cursor) params.starting_after = cursor;
 
     console.log(`[sync] Fetching emails page ${++page}${cursor ? ` (cursor: ${cursor.slice(0, 8)}...)` : ""}...`);
@@ -93,13 +109,23 @@ async function fetchAllEmails(apiKey: string): Promise<InstantlyEmail[]> {
 
     if (items.length === 0) break;
     allEmails.push(...items);
-    console.log(`[sync] Page ${page}: got ${items.length} emails (total: ${allEmails.length})`);
+
+    // Early termination: if >80% of this page already synced, the rest
+    // is old data we've seen before — stop fetching more pages.
+    const newInPage = items.filter((e) => !existingIds.has(e.id)).length;
+    const pctNew = newInPage / items.length;
+    console.log(`[sync] Page ${page}: ${items.length} emails, ${newInPage} new (${Math.round(pctNew * 100)}%) — total fetched: ${allEmails.length}`);
+
+    if (pctNew < 0.2 && page > 1) {
+      console.log(`[sync] Early termination: page ${page} is mostly old data`);
+      break;
+    }
 
     cursor = data.next_starting_after as string | undefined;
     if (!cursor || items.length < PAGE_SIZE) break;
   }
 
-  return allEmails;
+  return { emails: allEmails, exhausted };
 }
 
 async function fetchCampaigns(apiKey: string): Promise<Map<string, string>> {
@@ -180,11 +206,17 @@ function emailToPayload(
   };
 }
 
-export async function syncInstantly(integrationId: string): Promise<{
+export async function syncInstantly(
+  integrationId: string,
+  /** Total milliseconds this sync is allowed to run. Defaults to 50s
+   *  (safe margin inside Vercel's 60s limit). */
+  timeBudgetMs = 50_000,
+): Promise<{
   synced: number;
   skipped: number;
   errors: number;
 }> {
+  const startTime = Date.now();
   const integration = await prisma.integration.findUniqueOrThrow({
     where: { id: integrationId },
   });
@@ -197,7 +229,23 @@ export async function syncInstantly(integrationId: string): Promise<{
   const campaignMap = await fetchCampaigns(apiKey);
   console.log(`[sync] Found ${campaignMap.size} campaigns`);
 
-  const emails = await fetchAllEmails(apiKey);
+  // Batch dedup — fetch existing externalIds from recent messages only.
+  // Limiting to last 90 days avoids loading the entire message table into memory.
+  const dedupCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  const existingIds = new Set(
+    (await prisma.message.findMany({
+      where: {
+        workspaceId,
+        externalId: { not: null },
+        receivedAt: { gte: dedupCutoff },
+      },
+      select: { externalId: true },
+    })).map((m) => m.externalId).filter(Boolean)
+  );
+
+  const { emails } = await fetchEmailsIncremental(
+    apiKey, existingIds as Set<string>, timeBudgetMs, startTime,
+  );
   console.log(`[sync] Fetched ${emails.length} emails from Instantly`);
 
   // Sort chronologically so threads build in order
@@ -206,15 +254,6 @@ export async function syncInstantly(integrationId: string): Promise<{
     const db = new Date(b.timestamp_created || 0).getTime();
     return da - db;
   });
-
-  // Batch dedup — fetch all existing externalIds in ONE query to avoid
-  // per-message DB round trips (each ~100ms to Supabase = minutes for 100+ msgs).
-  const existingIds = new Set(
-    (await prisma.message.findMany({
-      where: { workspaceId, externalId: { not: null } },
-      select: { externalId: true },
-    })).map((m) => m.externalId).filter(Boolean)
-  );
 
   const newEmails = emails.filter((e) => !existingIds.has(e.id) && (e.lead || e.from_address_email || e.to_address_email_list));
   console.log(`[sync] ${emails.length - newEmails.length} already synced, ${newEmails.length} new emails to process`);
@@ -225,6 +264,12 @@ export async function syncInstantly(integrationId: string): Promise<{
 
   // Process only NEW emails sequentially to maintain thread ordering
   for (const email of newEmails) {
+    // Time-budget check — stop processing if we're running out of time
+    if (Date.now() - startTime > timeBudgetMs * 0.9) {
+      console.log(`[sync] Time budget exhausted during processing, ${newEmails.length - synced - errors} emails deferred to next sync`);
+      break;
+    }
+
     try {
       const payload = emailToPayload(email, campaignMap);
       if (!payload.prospectEmail) {
@@ -246,7 +291,8 @@ export async function syncInstantly(integrationId: string): Promise<{
     data: { lastSyncAt: new Date() },
   });
 
-  console.log(`[sync] Instantly sync complete: ${synced} synced, ${skipped} skipped, ${errors} errors`);
+  const elapsed = Math.round((Date.now() - startTime) / 1000);
+  console.log(`[sync] Instantly sync complete in ${elapsed}s: ${synced} synced, ${skipped} skipped, ${errors} errors`);
   return { synced, skipped, errors };
 }
 

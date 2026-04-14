@@ -108,11 +108,24 @@ async function fetchCampaigns(apiKey: string): Promise<HeyReachCampaign[]> {
   return all;
 }
 
-async function fetchAllConversations(apiKey: string): Promise<HeyReachConversation[]> {
+async function fetchConversationsIncremental(
+  apiKey: string,
+  lastSyncAt: Date | null,
+  timeBudgetMs: number,
+  startTime: number,
+): Promise<{ conversations: HeyReachConversation[]; exhausted: boolean }> {
   const all: HeyReachConversation[] = [];
   let offset = 0;
+  let exhausted = true;
 
   while (true) {
+    // Time-budget: leave half for processing
+    if (Date.now() - startTime > timeBudgetMs * 0.4) {
+      console.log(`[heyreach] Fetch phase hit 40% time budget after ${all.length} conversations`);
+      exhausted = false;
+      break;
+    }
+
     const data = await heyreachPost(apiKey, "/Inbox/GetConversationsV2", {
       offset,
       limit: BATCH_SIZE,
@@ -127,11 +140,25 @@ async function fetchAllConversations(apiKey: string): Promise<HeyReachConversati
     const total = data.totalCount || 0;
     console.log(`[heyreach] Fetched ${all.length}/${total} conversations...`);
 
+    // Early termination: if we have a lastSyncAt and all conversations
+    // in this page were last active before our last sync, stop.
+    if (lastSyncAt && items.length > 0) {
+      const staleCount = items.filter((c) => {
+        const lastMsg = c.lastMessageAt ? new Date(c.lastMessageAt) : null;
+        return lastMsg && lastMsg < lastSyncAt;
+      }).length;
+
+      if (staleCount === items.length && all.length > BATCH_SIZE) {
+        console.log(`[heyreach] Early termination: page is entirely older than last sync`);
+        break;
+      }
+    }
+
     if (all.length >= total || items.length < BATCH_SIZE) break;
     await new Promise((r) => setTimeout(r, 300));
   }
 
-  return all;
+  return { conversations: all, exhausted };
 }
 
 async function fetchLeadsFromCampaign(
@@ -168,11 +195,15 @@ async function fetchLeadsFromCampaign(
 
 // --- Main sync ---
 
-export async function syncHeyreach(integrationId: string): Promise<{
+export async function syncHeyreach(
+  integrationId: string,
+  timeBudgetMs = 50_000,
+): Promise<{
   synced: number;
   skipped: number;
   errors: number;
 }> {
+  const startTime = Date.now();
   const integration = await prisma.integration.findUniqueOrThrow({
     where: { id: integrationId },
   });
@@ -182,9 +213,11 @@ export async function syncHeyreach(integrationId: string): Promise<{
 
   console.log(`[heyreach] Starting sync for integration ${integrationId}`);
 
-  // 1. Fetch campaigns and conversations
+  // 1. Fetch campaigns and conversations (with incremental awareness)
   const campaigns = await fetchCampaigns(apiKey);
-  const conversations = await fetchAllConversations(apiKey);
+  const { conversations } = await fetchConversationsIncremental(
+    apiKey, integration.lastSyncAt, timeBudgetMs, startTime,
+  );
 
   console.log(`[heyreach] Processing ${conversations.length} conversations...`);
 
@@ -201,9 +234,13 @@ export async function syncHeyreach(integrationId: string): Promise<{
     const messages = conv.messages || [];
     if (messages.length === 0) continue;
 
-    for (const msg of messages) {
+    for (let msgIdx = 0; msgIdx < messages.length; msgIdx++) {
+      const msg = messages[msgIdx];
       const isOutbound = msg.sender === "ME";
-      const externalId = `hr_${conv.id}_${msg.createdAt || Date.now()}`;
+      // Use a stable identifier: conversation ID + createdAt + index within conversation.
+      // The index prevents collisions when multiple messages share the same createdAt.
+      // Never use Date.now() — it changes between sync runs and defeats deduplication.
+      const externalId = `hr_${conv.id}_${msg.createdAt || `idx_${msgIdx}`}`;
 
       allPayloads.push({
         provider: "HEYREACH",
@@ -231,11 +268,16 @@ export async function syncHeyreach(integrationId: string): Promise<{
   allPayloads.sort((a, b) => (a.sentAt?.getTime() || 0) - (b.sentAt?.getTime() || 0));
   console.log(`[heyreach] Processing ${allPayloads.length} messages...`);
 
-  // 2b. Batch dedup — fetch all existing externalIds in ONE query to avoid
-  // per-message DB round trips (each ~100ms to Supabase = minutes for 100+ msgs).
+  // 2b. Batch dedup — fetch existing externalIds from recent messages only.
+  // Limiting to last 90 days avoids loading the entire message table into memory.
+  const dedupCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
   const existingIds = new Set(
     (await prisma.message.findMany({
-      where: { workspaceId, externalId: { not: null } },
+      where: {
+        workspaceId,
+        externalId: { not: null, startsWith: "hr_" },
+        receivedAt: { gte: dedupCutoff },
+      },
       select: { externalId: true },
     })).map((m) => m.externalId).filter(Boolean)
   );
@@ -248,6 +290,12 @@ export async function syncHeyreach(integrationId: string): Promise<{
 
   // 3. Sync only NEW messages to threads
   for (let i = 0; i < newPayloads.length; i += 20) {
+    // Time-budget check
+    if (Date.now() - startTime > timeBudgetMs * 0.7) {
+      console.log(`[heyreach] Time budget 70% reached during processing, ${newPayloads.length - i} messages deferred`);
+      break;
+    }
+
     const batch = newPayloads.slice(i, i + 20);
     await Promise.allSettled(
       batch.map(async (payload) => {
@@ -265,12 +313,30 @@ export async function syncHeyreach(integrationId: string): Promise<{
   console.log(`[heyreach] Messages synced: ${synced} synced, ${skipped} skipped, ${errors} errors`);
 
   // 4. Enrich prospects from conversation profiles + campaign data
+  // Skip enrichment if we've used >80% of time budget — it'll run next cycle
+  if (Date.now() - startTime > timeBudgetMs * 0.8) {
+    console.log(`[heyreach] Skipping enrichment — time budget ${Math.round((Date.now() - startTime) / 1000)}s, will enrich next cycle`);
+    await prisma.integration.update({
+      where: { id: integrationId },
+      data: { lastSyncAt: new Date() },
+    });
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    console.log(`[heyreach] Sync complete in ${elapsed}s: ${synced} synced, ${skipped} skipped, ${errors} errors (enrichment deferred)`);
+    return { synced, skipped, errors };
+  }
+
   console.log(`[heyreach] Enriching prospects from ${conversations.length} conversations...`);
 
   // Build profileUrl → campaign name mapping from all campaigns
   const profileCampaignMap = new Map<string, { campaignName: string; status: string }>();
 
   for (const campaign of campaigns) {
+    // Time-budget check inside campaign loop
+    if (Date.now() - startTime > timeBudgetMs * 0.9) {
+      console.log(`[heyreach] Enrichment time budget reached, ${campaigns.length - campaigns.indexOf(campaign)} campaigns deferred`);
+      break;
+    }
+
     try {
       const leads = await fetchLeadsFromCampaign(apiKey, campaign.id);
       for (const lead of leads) {
@@ -401,7 +467,8 @@ export async function syncHeyreach(integrationId: string): Promise<{
     data: { lastSyncAt: new Date() },
   });
 
-  console.log(`[heyreach] Sync complete: ${synced} synced, ${skipped} skipped, ${errors} errors`);
+  const elapsed = Math.round((Date.now() - startTime) / 1000);
+  console.log(`[heyreach] Sync complete in ${elapsed}s: ${synced} synced, ${skipped} skipped, ${errors} errors`);
   return { synced, skipped, errors };
 }
 

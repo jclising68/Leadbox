@@ -31,19 +31,36 @@ export async function POST(
     return NextResponse.json({ error: "Thread not found" }, { status: 404 });
   }
 
-  // Find the active integration for this channel
-  const providerForChannel =
-    thread.channel === "EMAIL" ? "INSTANTLY" : "HEYREACH";
-
-  const integration = await prisma.integration.findFirst({
-    where: {
-      workspaceId: workspaceId!,
-      provider: providerForChannel,
-      isActive: true,
-    },
+  // Find the integration that owns this thread by looking at the most recent message
+  const lastMsg = await prisma.message.findFirst({
+    where: { threadId, integrationId: { not: null } },
+    orderBy: { sentAt: "desc" },
+    select: { integrationId: true },
   });
 
+  let integration = lastMsg?.integrationId
+    ? await prisma.integration.findFirst({
+        where: { id: lastMsg.integrationId, isActive: true },
+      })
+    : null;
+
+  // Fallback: if the original integration was deleted/disabled, find any active one for this channel
   if (!integration) {
+    const providerForChannel =
+      thread.channel === "EMAIL" ? "INSTANTLY" : "HEYREACH";
+
+    integration = await prisma.integration.findFirst({
+      where: {
+        workspaceId: workspaceId!,
+        provider: providerForChannel,
+        isActive: true,
+      },
+    });
+  }
+
+  if (!integration) {
+    const providerForChannel =
+      thread.channel === "EMAIL" ? "INSTANTLY" : "HEYREACH";
     return NextResponse.json(
       {
         error: `No active ${providerForChannel} integration found. Add one in Settings > Integrations.`,
@@ -66,7 +83,7 @@ export async function POST(
     });
   } catch (err) {
     console.error(
-      `[reply] Failed to send via ${providerForChannel}:`,
+      `[reply] Failed to send via ${integration.provider}:`,
       err instanceof Error ? err.message : err
     );
     return NextResponse.json(
