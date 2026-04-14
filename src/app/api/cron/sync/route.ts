@@ -1,12 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
 
 export const maxDuration = 60;
-const MAX_DURATION_MS = 55_000; // Stay under 60s Vercel limit
 
+/**
+ * Cron-triggered sync. Returns 200 immediately and runs the actual sync
+ * work via `after()` (Vercel's `waitUntil`) so the HTTP response doesn't
+ * depend on the sync finishing within the function timeout.
+ */
 export async function GET(req: NextRequest) {
   // Verify cron secret — fail closed if not configured
   const authHeader = req.headers.get("authorization");
@@ -21,9 +25,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const startTime = Date.now();
-  const results: { id: string; provider: string; synced: number; skipped: number; errors: number }[] = [];
-
   // Fetch all active integrations across all workspaces
   const integrations = await prisma.integration.findMany({
     where: { isActive: true },
@@ -31,85 +32,82 @@ export async function GET(req: NextRequest) {
     orderBy: { lastSyncAt: "asc" }, // Prioritize least-recently synced
   });
 
-  for (const integration of integrations) {
-    // Check time budget
-    if (Date.now() - startTime > MAX_DURATION_MS) {
-      console.log(`[cron] Time budget exhausted after ${results.length} integrations`);
-      break;
-    }
+  // Return immediately — actual sync runs in background via after()
+  after(async () => {
+    const startTime = Date.now();
+    const MAX_DURATION_MS = 55_000;
+    let processed = 0;
 
-    // Skip if manual sync is running (but recover stale locks > 5 min)
-    const config = (integration.config as Record<string, unknown>) ?? {};
-    if (config.syncRunning) {
-      const startedAt = config.syncStartedAt as string | undefined;
-      const elapsed = startedAt ? Date.now() - new Date(startedAt).getTime() : Infinity;
-      if (elapsed < 5 * 60 * 1000) {
-        console.log(`[cron] Skipping ${integration.id} — manual sync running`);
-        continue;
+    for (const integration of integrations) {
+      // Check time budget
+      if (Date.now() - startTime > MAX_DURATION_MS) {
+        console.log(`[cron] Time budget exhausted after ${processed} integrations`);
+        break;
       }
-      // Stale lock — clean it up
-      console.log(`[cron] Clearing stale sync lock on ${integration.id} (${Math.round(elapsed / 1000)}s old)`);
-      const c = { ...config };
-      delete c.syncRunning;
-      delete c.syncStartedAt;
-      await prisma.integration.update({
-        where: { id: integration.id },
-        data: { config: c as object },
-      });
-    }
 
-    try {
-      // Give each integration a share of remaining time
-      const remaining = MAX_DURATION_MS - (Date.now() - startTime);
-      const perIntegrationBudget = Math.min(remaining, 25_000); // Max 25s per integration
-      console.log(`[cron] Syncing ${integration.provider} integration ${integration.id} (budget: ${Math.round(perIntegrationBudget / 1000)}s)...`);
-
-      const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
-      const result = await syncFn(integration.id, perIntegrationBudget);
-
-      results.push({
-        id: integration.id,
-        provider: integration.provider,
-        ...result,
-      });
-
-      // Auto-enrich Instantly after sync
-      if (integration.provider === "INSTANTLY" && result.synced > 0) {
-        try {
-          await enrichFromInstantly(integration.id);
-        } catch (err) {
-          console.error(`[cron] Enrichment failed for ${integration.id}:`, err instanceof Error ? err.message : err);
+      // Skip if manual sync is running (but recover stale locks > 5 min)
+      const config = (integration.config as Record<string, unknown>) ?? {};
+      if (config.syncRunning) {
+        const startedAt = config.syncStartedAt as string | undefined;
+        const elapsed = startedAt ? Date.now() - new Date(startedAt).getTime() : Infinity;
+        if (elapsed < 5 * 60 * 1000) {
+          console.log(`[cron] Skipping ${integration.id} — manual sync running`);
+          continue;
         }
+        // Stale lock — clean it up
+        console.log(`[cron] Clearing stale sync lock on ${integration.id} (${Math.round(elapsed / 1000)}s old)`);
+        const c = { ...config };
+        delete c.syncRunning;
+        delete c.syncStartedAt;
+        await prisma.integration.update({
+          where: { id: integration.id },
+          data: { config: c as object },
+        });
       }
 
-      // Auto-archive pre-2026 threads
-      await prisma.thread.updateMany({
-        where: {
-          workspaceId: integration.workspaceId,
-          status: "OPEN",
-          lastMessageAt: { lt: new Date("2026-01-01T00:00:00.000Z") },
-        },
-        data: { status: "ARCHIVED" },
-      });
-    } catch (err) {
-      console.error(`[cron] Sync failed for ${integration.id}:`, err instanceof Error ? err.message : err);
-      results.push({
-        id: integration.id,
-        provider: integration.provider,
-        synced: 0,
-        skipped: 0,
-        errors: 1,
-      });
-    }
-  }
+      try {
+        const remaining = MAX_DURATION_MS - (Date.now() - startTime);
+        const perIntegrationBudget = Math.min(remaining, 25_000);
+        console.log(`[cron] Syncing ${integration.provider} integration ${integration.id} (budget: ${Math.round(perIntegrationBudget / 1000)}s)...`);
 
-  const elapsed = Date.now() - startTime;
-  console.log(`[cron] Sync complete in ${Math.round(elapsed / 1000)}s — ${results.length}/${integrations.length} integrations processed`);
+        const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
+        const result = await syncFn(integration.id, perIntegrationBudget);
+        processed++;
+
+        console.log(
+          `[cron] ${integration.provider} ${integration.id}: ${result.synced} synced, ${result.skipped} skipped, ${result.errors} errors`
+        );
+
+        // Auto-enrich Instantly after sync
+        if (integration.provider === "INSTANTLY" && result.synced > 0) {
+          try {
+            await enrichFromInstantly(integration.id);
+          } catch (err) {
+            console.error(`[cron] Enrichment failed for ${integration.id}:`, err instanceof Error ? err.message : err);
+          }
+        }
+
+        // Auto-archive pre-2026 threads
+        await prisma.thread.updateMany({
+          where: {
+            workspaceId: integration.workspaceId,
+            status: "OPEN",
+            lastMessageAt: { lt: new Date("2026-01-01T00:00:00.000Z") },
+          },
+          data: { status: "ARCHIVED" },
+        });
+      } catch (err) {
+        console.error(`[cron] Sync failed for ${integration.id}:`, err instanceof Error ? err.message : err);
+        processed++;
+      }
+    }
+
+    const elapsed = Date.now() - startTime;
+    console.log(`[cron] Sync complete in ${Math.round(elapsed / 1000)}s — ${processed}/${integrations.length} integrations processed`);
+  });
 
   return NextResponse.json({
-    processed: results.length,
-    total: integrations.length,
-    elapsed: `${Math.round(elapsed / 1000)}s`,
-    results,
+    status: "triggered",
+    integrations: integrations.length,
   });
 }

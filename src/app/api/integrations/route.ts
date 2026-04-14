@@ -8,9 +8,19 @@ import { syncInstantly, testInstantlyConnection } from "@/services/instantly-syn
 import { syncHeyreach, testHeyreachConnection } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
 
+function getAppUrl(req: NextRequest): string {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    req.nextUrl.origin ||
+    "https://leadbox-phi.vercel.app"
+  );
+}
+
 export async function GET(req: NextRequest) {
   const { error, workspaceId } = await requireWorkspaceAccess(req);
   if (error) return error;
+
+  const appUrl = getAppUrl(req);
 
   const integrations = await prisma.integration.findMany({
     where: { workspaceId: workspaceId! },
@@ -44,7 +54,7 @@ export async function GET(req: NextRequest) {
       apiKeyMasked: maskApiKey(
         decrypt(i.apiKeyEncrypted, i.apiKeyIv, i.apiKeyTag)
       ),
-      webhookUrl: `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/${i.provider.toLowerCase()}?workspace_id=${workspaceId}&secret=${i.webhookSecret}`,
+      webhookUrl: `${appUrl}/api/webhooks/${i.provider.toLowerCase()}?workspace_id=${workspaceId}&secret=${i.webhookSecret}`,
       totalMessages: iStats?.totalMessages ?? 0,
       lastActivityAt: iStats?.lastActivityAt ?? null,
       syncing: !!config.syncRunning,
@@ -58,6 +68,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const { error, workspaceId } = await requireWorkspaceAccess(req, "ADMIN");
   if (error) return error;
+
+  const appUrl = getAppUrl(req);
 
   const { provider, name, apiKey } = await req.json();
 
@@ -136,7 +148,7 @@ export async function POST(req: NextRequest) {
       name: integration.name,
       isActive: integration.isActive,
       syncing: true,
-      webhookUrl: `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/${provider.toLowerCase()}?workspace_id=${workspaceId}&secret=${webhookSecret}`,
+      webhookUrl: `${appUrl}/api/webhooks/${provider.toLowerCase()}?workspace_id=${workspaceId}&secret=${webhookSecret}`,
       createdAt: integration.createdAt,
     },
     { status: 201 }

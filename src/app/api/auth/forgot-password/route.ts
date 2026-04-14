@@ -83,7 +83,11 @@ export async function POST(req: NextRequest) {
   const supabase = createSupabaseAdmin();
   if (supabase) {
     try {
-      // Ensure user exists in Supabase Auth (no-op if already there).
+      // Ensure user exists in Supabase Auth. If they don't (e.g. registered
+      // before Supabase was added), create them so resetPasswordForEmail works.
+      // Note: createUser may introduce NULL token columns that crash GoTrue's
+      // scanner. If this happens, fix via SQL:
+      //   UPDATE auth.users SET confirmation_token = '' WHERE confirmation_token IS NULL;
       await supabase.auth.admin
         .createUser({
           email,
