@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getSupabaseBrowser } from "@/lib/supabase-browser";
 
 export default function ResetPasswordPage() {
   return (
@@ -42,6 +43,35 @@ function ResetPasswordForm() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
+  // Supabase recovery state
+  const [supabaseEmail, setSupabaseEmail] = useState<string | null>(null);
+  const [supabaseToken, setSupabaseToken] = useState<string | null>(null);
+  const initRef = useRef(false);
+
+  // Detect Supabase recovery callback (hash fragment: #access_token=...&type=recovery)
+  useEffect(() => {
+    if (initRef.current) return;
+    initRef.current = true;
+
+    const supabase = getSupabaseBrowser();
+    if (!supabase) return;
+
+    // Listen for the PASSWORD_RECOVERY event fired when Supabase detects
+    // recovery tokens in the URL hash.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === "PASSWORD_RECOVERY" && session?.user?.email) {
+          setSupabaseEmail(session.user.email);
+          setSupabaseToken(session.access_token);
+        }
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const isSupabaseFlow = !!supabaseEmail;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -53,26 +83,64 @@ function ResetPasswordForm() {
       setError("Passwords don't match.");
       return;
     }
-    if (!token) {
-      setError("Reset link is missing a token. Request a new one.");
-      return;
-    }
+
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, password }),
-      });
-      const data = (await res.json()) as { error?: string };
-      if (!res.ok) {
-        setError(data.error || "Could not reset password. Try requesting a new link.");
+      if (isSupabaseFlow) {
+        // ── Supabase recovery flow ──────────────────────────────────
+        const supabase = getSupabaseBrowser();
+        if (!supabase) throw new Error("Supabase client not available");
+
+        // 1. Update password in Supabase Auth
+        const { error: updateError } = await supabase.auth.updateUser({
+          password,
+        });
+        if (updateError) throw new Error(updateError.message);
+
+        // 2. Also update in our User table (bcrypt hash)
+        const res = await fetch("/api/auth/reset-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: supabaseEmail,
+            password,
+            supabaseFlow: true,
+            supabaseToken,
+          }),
+        });
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok) {
+          throw new Error(
+            data.error || "Could not update password. Try requesting a new link."
+          );
+        }
       } else {
-        setDone(true);
-        setTimeout(() => router.push("/login"), 1500);
+        // ── Legacy token flow ───────────────────────────────────────
+        if (!token) {
+          setError("Reset link is missing a token. Request a new one.");
+          setLoading(false);
+          return;
+        }
+        const res = await fetch("/api/auth/reset-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, password }),
+        });
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok) {
+          throw new Error(
+            data.error ||
+              "Could not reset password. Try requesting a new link."
+          );
+        }
       }
-    } catch {
-      setError("Network error. Please try again.");
+
+      setDone(true);
+      setTimeout(() => router.push("/login"), 1500);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Network error. Please try again."
+      );
     } finally {
       setLoading(false);
     }

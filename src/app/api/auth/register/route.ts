@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { createSupabaseAdmin } from "@/lib/supabase-server";
 
 export async function POST(req: NextRequest) {
   const { email, password, name } = await req.json();
@@ -32,6 +33,16 @@ export async function POST(req: NextRequest) {
   const user = await prisma.user.create({
     data: { email, passwordHash, name },
   });
+
+  // Also create the user in Supabase Auth so password-recovery emails work.
+  const supabase = createSupabaseAdmin();
+  if (supabase) {
+    await supabase.auth.admin
+      .createUser({ email, password, email_confirm: true })
+      .catch((err: unknown) => {
+        console.warn("[register] Supabase Auth user creation failed:", err);
+      });
+  }
 
   return NextResponse.json(
     { id: user.id, email: user.email, name: user.name },

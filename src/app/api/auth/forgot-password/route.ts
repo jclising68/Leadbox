@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/send-email";
+import { createSupabaseAdmin } from "@/lib/supabase-server";
 
 /**
  * Start a password reset. We ALWAYS return 200 with a generic message —
  * never reveal whether the email exists. If it does, we create a token
- * (valid for 1 hour) and email a reset link. If not, we silently no-op.
+ * (valid for 1 hour) and send a reset link via Supabase Auth (preferred)
+ * or Resend (fallback).
  */
 export async function POST(req: NextRequest) {
   let email: string;
@@ -24,8 +26,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Generic success response regardless of whether the email exists — this
-  // prevents using the endpoint to enumerate registered emails.
   const genericSuccess = NextResponse.json({
     ok: true,
     message:
@@ -35,8 +35,7 @@ export async function POST(req: NextRequest) {
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) return genericSuccess;
 
-  // Invalidate any older outstanding reset tokens for this email so only
-  // the newest one works.
+  // Always create a VerificationToken — used for validation in both flows.
   await prisma.verificationToken.deleteMany({
     where: { identifier: `pw-reset:${email}` },
   });
@@ -52,6 +51,38 @@ export async function POST(req: NextRequest) {
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.AUTH_URL ||
     "https://leadbox-phi.vercel.app";
+
+  // ── Preferred path: Supabase Auth sends the recovery email ──────────
+  const supabase = createSupabaseAdmin();
+  if (supabase) {
+    try {
+      // Ensure user exists in Supabase Auth (no-op if already there).
+      await supabase.auth.admin
+        .createUser({
+          email,
+          password: randomBytes(32).toString("hex"),
+          email_confirm: true,
+        })
+        .catch(() => {}); // "User already registered" is expected
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${origin}/reset-password`,
+      });
+
+      if (!error) {
+        console.log(`[forgot-password] Supabase recovery email sent to ${email}`);
+        return genericSuccess;
+      }
+
+      console.warn(
+        `[forgot-password] Supabase recovery failed: ${error.message}, falling back to Resend`
+      );
+    } catch (err) {
+      console.warn("[forgot-password] Supabase error:", err);
+    }
+  }
+
+  // ── Fallback: send email via Resend (or log to console) ─────────────
   const resetUrl = `${origin}/reset-password?token=${token}`;
 
   const subject = "Reset your LeadBox password";
@@ -77,7 +108,6 @@ this email — your password won't change.
   <p style="color:#999;font-size:12px;margin-top:32px">— LeadBox</p>
 </div>`;
 
-  // Fire the email but don't let a send failure block the reset flow.
   const result = await sendEmail({ to: email, subject, html, text });
   if (!result.sent) {
     console.warn(
