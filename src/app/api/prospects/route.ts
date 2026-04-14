@@ -103,18 +103,28 @@ export async function GET(req: NextRequest) {
       ...where.thread as Prisma.ThreadWhereInput,
       messages: { some: { direction: "INBOUND" } },
     };
-    // Also exclude non-actionable campaign statuses (only show tagged/replied leads)
-    where.NOT = {
-      leadStatus: {
-        in: [
-          "In Sequence", "in sequence",
-          "Completed", "completed",
-          "Not Yet Contacted", "not yet contacted",
-          "In Progress", "in progress",
-          "Paused", "paused",
+    // Exclude non-actionable campaign statuses but keep NULL (unset) statuses.
+    // SQL gotcha: NOT (NULL IN (...)) = NULL → treated as false, which would
+    // exclude every prospect with no leadStatus. Use OR to handle NULLs.
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : []),
+      {
+        OR: [
+          { leadStatus: { equals: null } },
+          {
+            leadStatus: {
+              notIn: [
+                "In Sequence", "in sequence",
+                "Completed", "completed",
+                "Not Yet Contacted", "not yet contacted",
+                "In Progress", "in progress",
+                "Paused", "paused",
+              ],
+            },
+          },
         ],
       },
-    };
+    ];
   }
 
   // Filter by specific lead status value
