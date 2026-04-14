@@ -20,11 +20,15 @@ async function isSyncRunning(integrationId: string): Promise<boolean> {
   const config = (integration?.config as Record<string, unknown>) ?? {};
   if (!config.syncRunning) return false;
 
-  // If sync started more than 10 minutes ago, consider it stale
+  // If sync started more than 2 minutes ago, consider it stale.
+  // On Vercel, after() background work can be killed at the 60s timeout
+  // without running finally blocks, so the flag may never be cleared.
+  // 2 minutes gives enough margin for legitimate syncs while recovering
+  // quickly from abandoned locks.
   const startedAt = config.syncStartedAt as string | undefined;
   if (startedAt) {
     const elapsed = Date.now() - new Date(startedAt).getTime();
-    if (elapsed > 10 * 60 * 1000) return false; // Stale — allow restart
+    if (elapsed > 2 * 60 * 1000) return false; // Stale — allow restart
   }
 
   return true;
@@ -148,8 +152,15 @@ export async function GET(
 
   const config = (integration.config as Record<string, unknown>) ?? {};
 
+  // Treat locks older than 2 minutes as stale (after() may have been killed)
+  let syncing = !!config.syncRunning;
+  if (syncing && config.syncStartedAt) {
+    const elapsed = Date.now() - new Date(config.syncStartedAt as string).getTime();
+    if (elapsed > 2 * 60 * 1000) syncing = false;
+  }
+
   return workspaceJson({
-    syncing: !!config.syncRunning,
+    syncing,
     lastSyncAt: integration.lastSyncAt,
   });
 }
