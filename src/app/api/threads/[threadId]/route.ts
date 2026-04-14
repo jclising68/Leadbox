@@ -42,10 +42,28 @@ export async function PATCH(
   const { threadId } = await params;
   const body = await req.json();
 
-  const allowedFields = ["status", "isUnread", "assignedTo"];
   const data: Record<string, unknown> = {};
-  for (const field of allowedFields) {
-    if (body[field] !== undefined) data[field] = body[field];
+
+  // Validate status enum
+  if (body.status !== undefined) {
+    const validStatuses = ["OPEN", "ARCHIVED", "SPAM", "TRASH"];
+    if (!validStatuses.includes(body.status)) {
+      return NextResponse.json({ error: "Invalid status value" }, { status: 400 });
+    }
+    data.status = body.status;
+  }
+
+  // Validate isUnread is boolean
+  if (body.isUnread !== undefined) {
+    if (typeof body.isUnread !== "boolean") {
+      return NextResponse.json({ error: "isUnread must be a boolean" }, { status: 400 });
+    }
+    data.isUnread = body.isUnread;
+  }
+
+  // assignedTo is a string or null
+  if (body.assignedTo !== undefined) {
+    data.assignedTo = body.assignedTo;
   }
 
   const thread = await prisma.thread.updateMany({

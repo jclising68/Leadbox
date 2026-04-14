@@ -203,7 +203,7 @@ export async function replyViaInstantly(
         integrationId,
         direction: "OUTBOUND",
         channel: "EMAIL",
-        fromEmail: null, // Will be the sending account email
+        fromEmail: eaccount,
         toEmail: thread.prospect.email,
         bodyHtml,
         bodyText: bodyHtml.replace(/<[^>]+>/g, "").trim(),

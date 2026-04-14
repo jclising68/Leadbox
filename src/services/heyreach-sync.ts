@@ -71,21 +71,34 @@ type HeyReachCampaignLead = {
 
 async function heyreachPost(apiKey: string, path: string, body: Record<string, unknown>) {
   const url = `${HEYREACH_API_BASE}${path}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "X-API-KEY": apiKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`HeyReach POST ${path} ${res.status}: ${text}`);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "X-API-KEY": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    // Retry on rate limit or server errors
+    if (res.status === 429 || (res.status >= 500 && attempt < 3)) {
+      const wait = Math.min(3000 * Math.pow(2, attempt), 30000);
+      console.log(`[heyreach] ${res.status} on ${path}, retrying in ${Math.round(wait / 1000)}s (attempt ${attempt + 1}/4)`);
+      await new Promise((r) => setTimeout(r, wait));
+      continue;
+    }
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HeyReach POST ${path} ${res.status}: ${text}`);
+    }
+
+    return res.json();
   }
 
-  return res.json();
+  throw new Error(`HeyReach POST ${path} failed after 4 retries`);
 }
 
 // --- Data fetching ---

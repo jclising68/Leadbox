@@ -127,6 +127,31 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error("HeyReach webhook error:", error);
+
+    // Try to update the webhook log to FAILED so it doesn't stay PENDING forever
+    try {
+      const url = req.nextUrl;
+      const workspaceId = url.searchParams.get("workspace_id");
+      if (workspaceId) {
+        const pendingLog = await prisma.webhookLog.findFirst({
+          where: { workspaceId, provider: "HEYREACH", status: "PENDING" },
+          orderBy: { createdAt: "desc" },
+        });
+        if (pendingLog) {
+          await prisma.webhookLog.update({
+            where: { id: pendingLog.id },
+            data: {
+              status: "FAILED",
+              errorMessage: error instanceof Error ? error.message : "Unknown error",
+              processedAt: new Date(),
+            },
+          });
+        }
+      }
+    } catch {
+      // Don't let log update failure mask the original error
+    }
+
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
