@@ -52,6 +52,17 @@ async function primeWorkspaceCache(client: QueryClient, workspaceId: string) {
   const headers = { "x-workspace-id": workspaceId };
 
   await Promise.all([
+    // Workspaces — needed by useCurrentWorkspaceId() to resolve the slug
+    // into a workspace ID. Without this, hooks like useProspects() stay
+    // disabled and the Leads page shows "No leads found".
+    client.fetchQuery({
+      queryKey: ["workspaces"],
+      queryFn: async () => {
+        const res = await fetch("/api/workspaces", { cache: "no-store" });
+        if (!res.ok) throw new Error("Failed to fetch workspaces");
+        return res.json();
+      },
+    }),
     // Default thread query — must mirror useThreads()'s queryKey exactly so
     // the children read directly from this cached entry on first render.
     client.fetchInfiniteQuery({
