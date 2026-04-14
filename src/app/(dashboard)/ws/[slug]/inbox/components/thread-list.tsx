@@ -34,6 +34,7 @@ export function ThreadList() {
     selectedThreadId, setSelectedThread, view,
     filterChannel, setFilterChannel,
     filterUnread, setFilterUnread,
+    filterHasReply, setFilterHasReply,
     filterDateFrom, setFilterDateFrom,
     searchQuery, setSearchQuery,
     clearFilters,
@@ -95,7 +96,7 @@ export function ThreadList() {
     }
   }, [virtualItems, threads.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const hasActiveFilters = !!filterChannel || filterUnread || !!filterDateFrom;
+  const hasActiveFilters = !!filterChannel || filterUnread || filterHasReply || !!filterDateFrom;
 
   const viewTitle = view === "ARCHIVED" ? "Archive" : view === "SPAM" ? "Spam" : view === "TRASH" ? "Trash" : "All messages";
 
@@ -194,6 +195,17 @@ export function ThreadList() {
               Unread only
             </button>
             <button
+              onClick={() => setFilterHasReply(!filterHasReply)}
+              className={cn(
+                "px-2 py-0.5 rounded text-[11px] border transition-colors",
+                filterHasReply
+                  ? "bg-primary/10 border-primary/30 text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Has reply
+            </button>
+            <button
               onClick={() => {
                 const d = new Date(); d.setDate(d.getDate() - 7);
                 setFilterDateFrom(filterDateFrom ? null : d.toISOString().split("T")[0]);
@@ -224,7 +236,7 @@ export function ThreadList() {
           <div className="mt-1.5 flex items-center gap-1">
             <Filter className="h-3 w-3 text-muted-foreground" />
             <span className="text-[11px] text-muted-foreground">
-              Filters ({[filterChannel, filterUnread && "unread"].filter(Boolean).length})
+              Filters ({[filterChannel, filterUnread && "unread", filterHasReply && "reply"].filter(Boolean).length})
             </span>
             <button onClick={clearFilters} className="text-muted-foreground hover:text-foreground">
               <X className="h-3 w-3" />

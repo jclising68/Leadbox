@@ -19,7 +19,8 @@ export async function resolveThread(
     throw new Error("Cannot resolve thread: prospect has no email or LinkedIn URL");
   }
 
-  // Wrap the entire resolve flow in a transaction for atomicity
+  // Wrap the entire resolve flow in a transaction for atomicity.
+  // Increase timeout from default 5s to 30s — Supabase PgBouncer can be slow.
   return prisma.$transaction(async (tx) => {
     // 1. Find or create prospect
     const prospect = await findOrCreateProspect(tx, workspaceId, payload);
@@ -167,7 +168,7 @@ export async function resolveThread(
     });
 
     return { prospect, thread, message, isNewThread };
-  });
+  }, { timeout: 30000 });
 }
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];

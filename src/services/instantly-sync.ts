@@ -208,9 +208,9 @@ function emailToPayload(
 
 export async function syncInstantly(
   integrationId: string,
-  /** Total milliseconds this sync is allowed to run. Defaults to 50s
-   *  (safe margin inside Vercel's 60s limit). */
-  timeBudgetMs = 50_000,
+  /** Total milliseconds this sync is allowed to run. Defaults to 250s
+   *  (safe margin inside Vercel Pro's 300s limit). */
+  timeBudgetMs = 250_000,
 ): Promise<{
   synced: number;
   skipped: number;

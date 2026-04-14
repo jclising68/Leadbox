@@ -4,7 +4,7 @@ import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * Cron-triggered sync. Returns 200 immediately and runs the actual sync
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   // Return immediately — actual sync runs in background via after()
   after(async () => {
     const startTime = Date.now();
-    const MAX_DURATION_MS = 55_000;
+    const MAX_DURATION_MS = 270_000;
     let processed = 0;
 
     for (const integration of integrations) {
@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
 
       try {
         const remaining = MAX_DURATION_MS - (Date.now() - startTime);
-        const perIntegrationBudget = Math.min(remaining, 25_000);
+        const perIntegrationBudget = Math.min(remaining, 120_000);
         console.log(`[cron] Syncing ${integration.provider} integration ${integration.id} (budget: ${Math.round(perIntegrationBudget / 1000)}s)...`);
 
         const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;

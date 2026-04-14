@@ -5,7 +5,7 @@ import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // Skip a sync if the integration was synced this recently
 const FRESH_WINDOW_MS = 2 * 60 * 1000; // 2 minutes

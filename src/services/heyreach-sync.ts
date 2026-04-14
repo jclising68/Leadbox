@@ -210,7 +210,7 @@ async function fetchLeadsFromCampaign(
 
 export async function syncHeyreach(
   integrationId: string,
-  timeBudgetMs = 50_000,
+  timeBudgetMs = 250_000,
 ): Promise<{
   synced: number;
   skipped: number;
@@ -434,17 +434,19 @@ export async function syncHeyreach(
       }
 
       if (Object.keys(updateData).length > 0 && profile.profileUrl) {
-        await prisma.prospect.update({
-          where: { workspaceId_linkedinUrl: { workspaceId, linkedinUrl: profile.profileUrl } },
+        // Use updateMany to avoid "Record not found" errors — the prospect
+        // may not exist yet if it was deferred to a future sync cycle.
+        const result = await prisma.prospect.updateMany({
+          where: { workspaceId, linkedinUrl: profile.profileUrl },
           data: updateData,
         });
-        enriched++;
+        if (result.count > 0) enriched++;
       }
 
       // Apply tags as thread labels
-      if (profile.tags && profile.tags.length > 0) {
-        const prospect = await prisma.prospect.findUnique({
-          where: { workspaceId_linkedinUrl: { workspaceId, linkedinUrl: profile.profileUrl } },
+      if (profile.tags && profile.tags.length > 0 && profile.profileUrl) {
+        const prospect = await prisma.prospect.findFirst({
+          where: { workspaceId, linkedinUrl: profile.profileUrl },
           select: { thread: { select: { id: true } } },
         });
         if (prospect?.thread) {

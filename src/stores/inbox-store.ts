@@ -14,6 +14,7 @@ type InboxStore = {
   filterChannel: string | null;
   filterCampaign: string | null;
   filterUnread: boolean;
+  filterHasReply: boolean;
   filterDateFrom: string | null;
   setView: (view: InboxView) => void;
   setSelectedThread: (id: string | null) => void;
@@ -23,6 +24,7 @@ type InboxStore = {
   setFilterChannel: (ch: string | null) => void;
   setFilterCampaign: (c: string | null) => void;
   setFilterUnread: (u: boolean) => void;
+  setFilterHasReply: (h: boolean) => void;
   setFilterDateFrom: (d: string | null) => void;
   clearFilters: () => void;
 };
@@ -38,6 +40,7 @@ export const useInboxStore = create<InboxStore>()(
       filterChannel: null,
       filterCampaign: null,
       filterUnread: false,
+      filterHasReply: false,
       filterDateFrom: null,
       setView: (view) => set({ view, selectedLabelId: null }),
       setSelectedThread: (id) => set({ selectedThreadId: id }),
@@ -47,8 +50,9 @@ export const useInboxStore = create<InboxStore>()(
       setFilterChannel: (ch) => set({ filterChannel: ch }),
       setFilterCampaign: (c) => set({ filterCampaign: c }),
       setFilterUnread: (u) => set({ filterUnread: u }),
+      setFilterHasReply: (h) => set({ filterHasReply: h }),
       setFilterDateFrom: (d) => set({ filterDateFrom: d }),
-      clearFilters: () => set({ filterChannel: null, filterCampaign: null, filterUnread: false, filterDateFrom: null, searchQuery: "" }),
+      clearFilters: () => set({ filterChannel: null, filterCampaign: null, filterUnread: false, filterHasReply: false, filterDateFrom: null, searchQuery: "" }),
     }),
     {
       name: "leadbox-inbox",
