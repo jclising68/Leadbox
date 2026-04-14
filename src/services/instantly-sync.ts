@@ -207,12 +207,24 @@ export async function syncInstantly(integrationId: string): Promise<{
     return da - db;
   });
 
+  // Batch dedup — fetch all existing externalIds in ONE query to avoid
+  // per-message DB round trips (each ~100ms to Supabase = minutes for 100+ msgs).
+  const existingIds = new Set(
+    (await prisma.message.findMany({
+      where: { workspaceId, externalId: { not: null } },
+      select: { externalId: true },
+    })).map((m) => m.externalId).filter(Boolean)
+  );
+
+  const newEmails = emails.filter((e) => !existingIds.has(e.id) && (e.lead || e.from_address_email || e.to_address_email_list));
+  console.log(`[sync] ${emails.length - newEmails.length} already synced, ${newEmails.length} new emails to process`);
+
   let synced = 0;
-  let skipped = 0;
+  let skipped = emails.length - newEmails.length;
   let errors = 0;
 
-  // Process sequentially to maintain thread ordering and avoid race conditions
-  for (const email of emails) {
+  // Process only NEW emails sequentially to maintain thread ordering
+  for (const email of newEmails) {
     try {
       const payload = emailToPayload(email, campaignMap);
       if (!payload.prospectEmail) {

@@ -231,16 +231,27 @@ export async function syncHeyreach(integrationId: string): Promise<{
   allPayloads.sort((a, b) => (a.sentAt?.getTime() || 0) - (b.sentAt?.getTime() || 0));
   console.log(`[heyreach] Processing ${allPayloads.length} messages...`);
 
-  // 3. Sync messages to threads
-  for (let i = 0; i < allPayloads.length; i += 20) {
-    const batch = allPayloads.slice(i, i + 20);
+  // 2b. Batch dedup — fetch all existing externalIds in ONE query to avoid
+  // per-message DB round trips (each ~100ms to Supabase = minutes for 100+ msgs).
+  const existingIds = new Set(
+    (await prisma.message.findMany({
+      where: { workspaceId, externalId: { not: null } },
+      select: { externalId: true },
+    })).map((m) => m.externalId).filter(Boolean)
+  );
+  const newPayloads = allPayloads.filter(
+    (p) => p.externalId && !existingIds.has(p.externalId) && (p.prospectLinkedinUrl || p.prospectEmail)
+  );
+  const alreadySynced = allPayloads.length - newPayloads.length;
+  console.log(`[heyreach] ${alreadySynced} already synced, ${newPayloads.length} new messages to process`);
+  skipped += alreadySynced;
+
+  // 3. Sync only NEW messages to threads
+  for (let i = 0; i < newPayloads.length; i += 20) {
+    const batch = newPayloads.slice(i, i + 20);
     await Promise.allSettled(
       batch.map(async (payload) => {
         try {
-          if (!payload.prospectLinkedinUrl && !payload.prospectEmail) {
-            skipped++;
-            return;
-          }
           await resolveThread(workspaceId, integrationId, payload);
           synced++;
         } catch {
@@ -248,7 +259,7 @@ export async function syncHeyreach(integrationId: string): Promise<{
         }
       })
     );
-    if (i + 20 < allPayloads.length) await new Promise((r) => setTimeout(r, 100));
+    if (i + 20 < newPayloads.length) await new Promise((r) => setTimeout(r, 100));
   }
 
   console.log(`[heyreach] Messages synced: ${synced} synced, ${skipped} skipped, ${errors} errors`);
