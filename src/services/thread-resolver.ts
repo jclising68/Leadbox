@@ -149,8 +149,12 @@ export async function resolveThread(
       },
     });
 
-    // 5. Update thread — only update snippet/lastMessageAt if this message
-    //    is newer than what's already on the thread (supports out-of-order processing)
+    // 5. Update thread
+    //    - snippet: set if currently empty (covers first message) OR if this
+    //      message is newer than the last one we've seen on the thread
+    //    - lastMessageAt: only bump forward, never backward
+    //    This supports out-of-order processing without losing snippets on
+    //    newly-created threads where thread.lastMessageAt == msgTime.
     const snippet =
       payload.bodyText?.slice(0, 200) ||
       payload.messageText?.slice(0, 200) ||
@@ -158,12 +162,15 @@ export async function resolveThread(
       "";
 
     const msgTime = payload.sentAt || new Date();
-    const isNewer = !thread.lastMessageAt || msgTime > thread.lastMessageAt;
+    const snippetIsEmpty = !thread.snippet || thread.snippet.length === 0;
+    const isNewerThanLast = !thread.lastMessageAt || msgTime > thread.lastMessageAt;
+    const shouldUpdateSnippet = snippet.length > 0 && (snippetIsEmpty || isNewerThanLast);
 
     await tx.thread.update({
       where: { id: thread.id },
       data: {
-        ...(isNewer ? { snippet, lastMessageAt: msgTime } : {}),
+        ...(shouldUpdateSnippet ? { snippet } : {}),
+        ...(isNewerThanLast ? { lastMessageAt: msgTime } : {}),
         messageCount: { increment: 1 },
         isUnread: payload.direction === "INBOUND" ? true : undefined,
       },

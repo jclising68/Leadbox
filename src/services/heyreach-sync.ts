@@ -7,6 +7,20 @@ import type { NormalizedWebhookPayload } from "@/types";
 const HEYREACH_API_BASE = "https://api.heyreach.io/api/public";
 const BATCH_SIZE = 50;
 
+// Default color for auto-created HeyReach tag labels.
+// Mirrors known statuses to colors; unknown tags get a neutral violet.
+function heyreachTagColor(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes("interested") && !n.includes("not")) return "#22C55E";
+  if (n.includes("not interested")) return "#EF4444";
+  if (n.includes("meeting")) return "#3B82F6";
+  if (n.includes("out of office")) return "#6B7280";
+  if (n.includes("wrong person")) return "#F97316";
+  if (n.includes("auto reply")) return "#EC4899";
+  if (n.includes("future")) return "#EAB308";
+  return "#8B5CF6";
+}
+
 // --- Types based on actual HeyReach API response ---
 
 type HeyReachProfile = {
@@ -444,7 +458,8 @@ export async function syncHeyreach(
         if (result.count > 0) enriched++;
       }
 
-      // Apply tags as thread labels
+      // Apply tags as thread labels — auto-create the label if missing so
+      // user-defined HeyReach tags surface in the inbox without manual setup.
       if (profile.tags && profile.tags.length > 0 && profile.profileUrl) {
         const prospect = await prisma.prospect.findFirst({
           where: { workspaceId, linkedinUrl: profile.profileUrl },
@@ -452,21 +467,28 @@ export async function syncHeyreach(
         });
         if (prospect?.thread) {
           for (const tag of profile.tags) {
-            const label = await prisma.label.findFirst({
+            let label = await prisma.label.findFirst({
               where: { workspaceId, name: { equals: tag, mode: "insensitive" } },
+              select: { id: true },
             });
-            if (label) {
-              await prisma.threadLabel.upsert({
-                where: { threadId_labelId: { threadId: prospect.thread.id, labelId: label.id } },
-                create: {
-                  threadId: prospect.thread.id,
-                  labelId: label.id,
-                  source: "WEBHOOK",
-                  confidence: 1.0,
-                },
+            if (!label) {
+              label = await prisma.label.upsert({
+                where: { workspaceId_name: { workspaceId, name: tag } },
+                create: { workspaceId, name: tag, color: heyreachTagColor(tag) },
                 update: {},
+                select: { id: true },
               });
             }
+            await prisma.threadLabel.upsert({
+              where: { threadId_labelId: { threadId: prospect.thread.id, labelId: label.id } },
+              create: {
+                threadId: prospect.thread.id,
+                labelId: label.id,
+                source: "WEBHOOK",
+                confidence: 1.0,
+              },
+              update: {},
+            });
           }
         }
       }

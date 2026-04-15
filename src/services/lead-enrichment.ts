@@ -19,6 +19,21 @@ const INTEREST_STATUS_MAP: Record<number, string> = {
   8: "Not the right time",
 };
 
+// Pick a sensible default color for an auto-created label based on its name.
+// Matches the UI conventions used by getStatusColor() on the leads page.
+function colorForStatus(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes("interested") && !n.includes("not")) return "#22C55E"; // green
+  if (n.includes("not interested")) return "#EF4444"; // red
+  if (n.includes("meeting")) return "#3B82F6"; // blue
+  if (n.includes("closed") || n.includes("won")) return "#10B981"; // emerald
+  if (n.includes("out of office")) return "#6B7280"; // gray
+  if (n.includes("wrong person")) return "#F97316"; // orange
+  if (n.includes("auto reply")) return "#EC4899"; // pink
+  if (n.includes("future") || n.includes("not the right time")) return "#EAB308"; // yellow
+  return "#8B5CF6"; // violet (default)
+}
+
 // Instantly campaign status mapping (lead progress through campaign)
 function getCampaignStatus(status: number | undefined, replyCount: number | undefined): string {
   if (replyCount && replyCount > 0) return "Replied";
@@ -269,23 +284,37 @@ export async function enrichFromInstantly(
               enriched++;
             }
 
-            // Apply interest label using pre-fetched label map
+            // Apply interest label — auto-create the label if it doesn't
+            // exist yet (e.g. new workspace, or Instantly added a new status).
             if (interestLabel && prospect?.thread) {
-              const label = labelByName.get(interestLabel.toLowerCase());
-              if (label) {
-                await prisma.threadLabel.upsert({
+              let label = labelByName.get(interestLabel.toLowerCase());
+              if (!label) {
+                label = await prisma.label.upsert({
                   where: {
-                    threadId_labelId: { threadId: prospect.thread.id, labelId: label.id },
+                    workspaceId_name: { workspaceId, name: interestLabel },
                   },
                   create: {
-                    threadId: prospect.thread.id,
-                    labelId: label.id,
-                    source: "WEBHOOK",
-                    confidence: 1.0,
+                    workspaceId,
+                    name: interestLabel,
+                    color: colorForStatus(interestLabel),
                   },
                   update: {},
+                  select: { id: true, name: true },
                 });
+                labelByName.set(interestLabel.toLowerCase(), label);
               }
+              await prisma.threadLabel.upsert({
+                where: {
+                  threadId_labelId: { threadId: prospect.thread.id, labelId: label.id },
+                },
+                create: {
+                  threadId: prospect.thread.id,
+                  labelId: label.id,
+                  source: "WEBHOOK",
+                  confidence: 1.0,
+                },
+                update: {},
+              });
             }
           } catch {
             errors++;
