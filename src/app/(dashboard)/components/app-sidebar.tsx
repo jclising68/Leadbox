@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useInboxStore } from "@/stores/inbox-store";
 import { useWorkspaces } from "@/hooks/use-workspace";
+import { Logo } from "@/components/logo";
 
 function useWorkspaceSlug() {
   const { data: workspaces } = useWorkspaces();
@@ -129,10 +130,19 @@ export function AppSidebar() {
         collapsed ? "w-14" : "w-48"
       )}
     >
-      {/* Workspace switcher */}
+      {/* Brand + workspace switcher */}
       <div className={cn("flex items-center py-3", collapsed ? "justify-center" : "px-3 gap-2")}>
+        {collapsed ? (
+          <Logo iconOnly className="h-7 w-auto shrink-0" priority />
+        ) : (
+          <Logo className="h-6 w-auto shrink-0" priority />
+        )}
+      </div>
+
+      {/* Workspace switcher */}
+      <div className={cn("flex items-center pb-3", collapsed ? "justify-center" : "px-3 gap-2")}>
         <DropdownMenu>
-          <DropdownMenuTrigger className="w-8 h-8 rounded-lg bg-red-500 flex items-center justify-center text-white font-bold text-sm hover:bg-red-600 transition-colors cursor-pointer outline-none shrink-0">
+          <DropdownMenuTrigger className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm hover:bg-primary/20 transition-colors cursor-pointer outline-none shrink-0">
             {activeWorkspace?.name?.[0]?.toUpperCase() || "L"}
           </DropdownMenuTrigger>
           <DropdownMenuContent side="right" align="start" className="w-56">

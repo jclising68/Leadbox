@@ -53,6 +53,10 @@ export default auth((req) => {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/webhooks|api/cron).*)",
+    // Skip Next internals, webhooks/cron APIs, and any request for a static
+    // asset in /public (anything with a file extension like .png/.svg/.ico).
+    // Without the extension carve-out, the auth guard would 307 image
+    // requests to /login and break logos / favicons for signed-out users.
+    "/((?!_next/static|_next/image|api/webhooks|api/cron|.*\\.[\\w]+$).*)",
   ],
 };
