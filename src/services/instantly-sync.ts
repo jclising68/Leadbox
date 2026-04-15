@@ -7,6 +7,10 @@ const INSTANTLY_API_BASE = "https://api.instantly.ai/api/v2";
 const PAGE_SIZE = 100;
 const MIN_REQUEST_GAP_MS = 1000; // 1 request/sec — safely under Instantly v2 rate limits
 
+// Per-API-key rate limiter so parallel syncs of different workspaces don't
+// throttle each other (each Instantly account has its own quota).
+const lastRequestByKey = new Map<string, number>();
+
 type InstantlyEmail = {
   id: string;
   timestamp_created: string;
@@ -27,7 +31,14 @@ type InstantlyEmail = {
   to_address_json?: { address: string; name: string }[];
 };
 
-let lastRequestTime = 0;
+async function pacePerKey(apiKey: string) {
+  const last = lastRequestByKey.get(apiKey) ?? 0;
+  const gap = Date.now() - last;
+  if (gap < MIN_REQUEST_GAP_MS) {
+    await new Promise((r) => setTimeout(r, MIN_REQUEST_GAP_MS - gap));
+  }
+  lastRequestByKey.set(apiKey, Date.now());
+}
 
 async function rateLimitedFetch(apiKey: string, path: string, params?: Record<string, string>, retries = 5): Promise<Record<string, unknown>> {
   const url = new URL(`${INSTANTLY_API_BASE}${path}`);
@@ -36,13 +47,7 @@ async function rateLimitedFetch(apiKey: string, path: string, params?: Record<st
   }
 
   for (let attempt = 0; attempt <= retries; attempt++) {
-    // Ensure minimum gap between requests
-    const now = Date.now();
-    const timeSinceLast = now - lastRequestTime;
-    if (timeSinceLast < MIN_REQUEST_GAP_MS) {
-      await new Promise((r) => setTimeout(r, MIN_REQUEST_GAP_MS - timeSinceLast));
-    }
-    lastRequestTime = Date.now();
+    await pacePerKey(apiKey);
 
     try {
       const res = await fetch(url.toString(), {
@@ -56,7 +61,7 @@ async function rateLimitedFetch(apiKey: string, path: string, params?: Record<st
         const waitMs = Math.min(10000 * Math.pow(2, attempt), 120000);
         console.log(`[sync] Rate limited on ${path}, waiting ${Math.round(waitMs / 1000)}s (attempt ${attempt + 1}/${retries + 1})`);
         await new Promise((r) => setTimeout(r, waitMs));
-        lastRequestTime = Date.now();
+        lastRequestByKey.set(apiKey, Date.now());
         continue;
       }
 

@@ -4,7 +4,11 @@ import { decrypt } from "@/lib/crypto";
 const INSTANTLY_API_BASE = "https://api.instantly.ai/api/v2";
 const MIN_REQUEST_GAP_MS = 1000; // Match sync rate — 1 req/sec is safely under Instantly v2 limits
 
-let lastRequestTime = 0;
+// Per-API-key rate limiter state. Using a Map (instead of a single
+// `lastRequestTime` global) lets multiple workspaces' enrichments run in
+// parallel without one workspace's pacing penalising another's. Keyed by
+// API key — each Instantly account has its own quota anyway.
+const lastRequestByKey = new Map<string, number>();
 
 // Instantly lt_interest_status mapping
 const INTEREST_STATUS_MAP: Record<number, string> = {
@@ -48,13 +52,17 @@ function getCampaignStatus(status: number | undefined, replyCount: number | unde
   }
 }
 
-async function rateLimitedPost(apiKey: string, path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const now = Date.now();
-  const gap = now - lastRequestTime;
+async function pacePerKey(apiKey: string) {
+  const last = lastRequestByKey.get(apiKey) ?? 0;
+  const gap = Date.now() - last;
   if (gap < MIN_REQUEST_GAP_MS) {
     await new Promise((r) => setTimeout(r, MIN_REQUEST_GAP_MS - gap));
   }
-  lastRequestTime = Date.now();
+  lastRequestByKey.set(apiKey, Date.now());
+}
+
+async function rateLimitedPost(apiKey: string, path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  await pacePerKey(apiKey);
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const res = await fetch(`${INSTANTLY_API_BASE}${path}`, {
@@ -70,7 +78,7 @@ async function rateLimitedPost(apiKey: string, path: string, body: Record<string
       const wait = Math.min(10000 * Math.pow(2, attempt), 120000);
       console.log(`[enrich] Rate limited, waiting ${Math.round(wait / 1000)}s`);
       await new Promise((r) => setTimeout(r, wait));
-      lastRequestTime = Date.now();
+      lastRequestByKey.set(apiKey, Date.now());
       continue;
     }
 
@@ -85,12 +93,7 @@ async function rateLimitedPost(apiKey: string, path: string, body: Record<string
 }
 
 async function rateLimitedGet(apiKey: string, path: string, params?: Record<string, string>): Promise<Record<string, unknown>> {
-  const now = Date.now();
-  const gap = now - lastRequestTime;
-  if (gap < MIN_REQUEST_GAP_MS) {
-    await new Promise((r) => setTimeout(r, MIN_REQUEST_GAP_MS - gap));
-  }
-  lastRequestTime = Date.now();
+  await pacePerKey(apiKey);
 
   const url = new URL(`${INSTANTLY_API_BASE}${path}`);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -103,7 +106,7 @@ async function rateLimitedGet(apiKey: string, path: string, params?: Record<stri
     if (res.status === 429) {
       const wait = Math.min(10000 * Math.pow(2, attempt), 120000);
       await new Promise((r) => setTimeout(r, wait));
-      lastRequestTime = Date.now();
+      lastRequestByKey.set(apiKey, Date.now());
       continue;
     }
     if (!res.ok) {
