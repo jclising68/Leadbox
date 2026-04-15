@@ -8,6 +8,9 @@ import { syncInstantly, testInstantlyConnection } from "@/services/instantly-syn
 import { syncHeyreach, testHeyreachConnection } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
 
+// Initial sync + enrichment can take a while for large accounts
+export const maxDuration = 300;
+
 function getAppUrl(req: NextRequest): string {
   return (
     process.env.NEXT_PUBLIC_APP_URL ||

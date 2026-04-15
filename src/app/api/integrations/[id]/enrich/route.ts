@@ -5,7 +5,7 @@ import { enrichFromInstantly } from "@/services/lead-enrichment";
 import { syncHeyreach } from "@/services/heyreach-sync";
 import { after } from "next/server";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 async function isEnrichRunning(integrationId: string): Promise<boolean> {
   const integration = await prisma.integration.findUnique({
