@@ -11,14 +11,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+// Format a thread row's date column. We always show the actual provider
+// date — never relative ("9hr ago") — so the user can scan dates directly
+// and verify they line up with what they see in Instantly / HeyReach Unibox.
 function formatDate(date: string) {
   const d = new Date(date);
   const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffDay = Math.floor(diffMs / 86400000);
-  if (diffDay === 0) return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  if (diffDay < 7) return d.toLocaleDateString("en-US", { weekday: "short" });
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
 }
 
 function getInitials(firstName?: string | null, lastName?: string | null, email?: string | null) {
@@ -36,6 +40,7 @@ export function ThreadList() {
     filterUnread, setFilterUnread,
     filterHasReply, setFilterHasReply,
     filterDateFrom, setFilterDateFrom,
+    filterDateTo, setFilterDateTo,
     searchQuery, setSearchQuery,
     clearFilters,
   } = useInboxStore();
@@ -96,7 +101,7 @@ export function ThreadList() {
     }
   }, [virtualItems, threads.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const hasActiveFilters = !!filterChannel || filterUnread || filterHasReply || !!filterDateFrom;
+  const hasActiveFilters = !!filterChannel || filterUnread || filterHasReply || !!filterDateFrom || !!filterDateTo;
 
   const viewTitle = view === "ARCHIVED" ? "Archive" : view === "SPAM" ? "Spam" : view === "TRASH" ? "Trash" : "All messages";
 
@@ -205,19 +210,58 @@ export function ThreadList() {
             >
               Has reply
             </button>
+            {/* Date range — bound by message date (the original Instantly /
+                HeyReach send/receive timestamp, not the synced-at time). */}
+            <div className="flex items-center gap-1">
+              <input
+                type="date"
+                value={filterDateFrom ?? ""}
+                onChange={(e) => setFilterDateFrom(e.target.value || null)}
+                className={cn(
+                  "px-1.5 py-0.5 rounded text-[11px] border bg-background focus:outline-none focus:ring-1 focus:ring-primary/40",
+                  filterDateFrom
+                    ? "border-primary/30 text-primary"
+                    : "border-border text-muted-foreground"
+                )}
+                aria-label="From date"
+                title="From date"
+              />
+              <span className="text-[11px] text-muted-foreground">→</span>
+              <input
+                type="date"
+                value={filterDateTo ?? ""}
+                onChange={(e) => setFilterDateTo(e.target.value || null)}
+                className={cn(
+                  "px-1.5 py-0.5 rounded text-[11px] border bg-background focus:outline-none focus:ring-1 focus:ring-primary/40",
+                  filterDateTo
+                    ? "border-primary/30 text-primary"
+                    : "border-border text-muted-foreground"
+                )}
+                aria-label="To date"
+                title="To date"
+              />
+            </div>
             <button
               onClick={() => {
                 const d = new Date(); d.setDate(d.getDate() - 7);
-                setFilterDateFrom(filterDateFrom ? null : d.toISOString().split("T")[0]);
+                setFilterDateFrom(d.toISOString().split("T")[0]);
+                setFilterDateTo(null);
               }}
-              className={cn(
-                "px-2 py-0.5 rounded text-[11px] border transition-colors",
-                filterDateFrom
-                  ? "bg-primary/10 border-primary/30 text-primary"
-                  : "border-border text-muted-foreground hover:text-foreground"
-              )}
+              className="px-2 py-0.5 rounded text-[11px] border border-border text-muted-foreground hover:text-foreground transition-colors"
+              title="Quick set: last 7 days"
             >
-              Last 7 days
+              7d
+            </button>
+            <button
+              onClick={() => {
+                const d = new Date(); d.setDate(d.getDate() - 30);
+                setFilterDateFrom(d.toISOString().split("T")[0]);
+                setFilterDateTo(null);
+              }}
+              className="px-2 py-0.5 rounded text-[11px] border border-border text-muted-foreground hover:text-foreground transition-colors"
+              title="Quick set: last 30 days"
+            >
+              30d
             </button>
             {hasActiveFilters && (
               <button
@@ -236,7 +280,7 @@ export function ThreadList() {
           <div className="mt-1.5 flex items-center gap-1">
             <Filter className="h-3 w-3 text-muted-foreground" />
             <span className="text-[11px] text-muted-foreground">
-              Filters ({[filterChannel, filterUnread && "unread", filterHasReply && "reply"].filter(Boolean).length})
+              Filters ({[filterChannel, filterUnread && "unread", filterHasReply && "reply", (filterDateFrom || filterDateTo) && "date"].filter(Boolean).length})
             </span>
             <button onClick={clearFilters} className="text-muted-foreground hover:text-foreground">
               <X className="h-3 w-3" />
@@ -344,7 +388,10 @@ export function ThreadList() {
                               </span>
                             )}
                           </div>
-                          <span className="text-[11px] text-muted-foreground shrink-0">
+                          <span
+                            className="text-[11px] text-muted-foreground shrink-0"
+                            title={thread.lastMessageAt ? new Date(thread.lastMessageAt).toLocaleString() : ""}
+                          >
                             {thread.lastMessageAt ? formatDate(thread.lastMessageAt) : ""}
                           </span>
                         </div>

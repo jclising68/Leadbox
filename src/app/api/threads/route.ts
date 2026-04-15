@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
   const search = url.searchParams.get("search");
   const cursor = url.searchParams.get("cursor");
   const dateFrom = url.searchParams.get("dateFrom");
+  const dateTo = url.searchParams.get("dateTo");
   const hasReply = url.searchParams.get("hasReply");
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 100);
 
@@ -39,8 +40,16 @@ export async function GET(req: NextRequest) {
     where.isUnread = true;
   }
 
-  if (dateFrom) {
-    where.lastMessageAt = { gte: new Date(dateFrom) };
+  if (dateFrom || dateTo) {
+    const range: { gte?: Date; lte?: Date } = {};
+    if (dateFrom) range.gte = new Date(dateFrom);
+    if (dateTo) {
+      // Make `dateTo` inclusive of the entire selected day.
+      const end = new Date(dateTo);
+      end.setHours(23, 59, 59, 999);
+      range.lte = end;
+    }
+    where.lastMessageAt = range;
   }
 
   // Only show threads where the lead has replied (has INBOUND messages)
