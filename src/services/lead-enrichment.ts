@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
 
 const INSTANTLY_API_BASE = "https://api.instantly.ai/api/v2";
-const MIN_REQUEST_GAP_MS = 3500;
+const MIN_REQUEST_GAP_MS = 1000; // Match sync rate — 1 req/sec is safely under Instantly v2 limits
 
 let lastRequestTime = 0;
 
@@ -118,11 +118,16 @@ type InstantlyLead = {
   timestamp_last_contact?: string;
 };
 
-export async function enrichFromInstantly(integrationId: string): Promise<{
+export async function enrichFromInstantly(
+  integrationId: string,
+  /** Total milliseconds this enrichment run is allowed to use. Default 120s. */
+  timeBudgetMs = 120_000,
+): Promise<{
   enriched: number;
   campaigns: number;
   errors: number;
 }> {
+  const startTime = Date.now();
   const integration = await prisma.integration.findUniqueOrThrow({
     where: { id: integrationId },
   });
@@ -130,7 +135,7 @@ export async function enrichFromInstantly(integrationId: string): Promise<{
   const apiKey = decrypt(integration.apiKeyEncrypted, integration.apiKeyIv, integration.apiKeyTag);
   const workspaceId = integration.workspaceId;
 
-  console.log(`[enrich] Starting enrichment for integration ${integrationId}`);
+  console.log(`[enrich] Starting enrichment for integration ${integrationId} (budget: ${Math.round(timeBudgetMs / 1000)}s)`);
 
   // 1. Get all campaigns
   const campaignData = await rateLimitedGet(apiKey, "/campaigns", { limit: "100" });
@@ -176,9 +181,18 @@ export async function enrichFromInstantly(integrationId: string): Promise<{
 
   // 2. For each campaign, fetch all leads
   for (const campaign of campaigns) {
+    // Time-budget check — stop gracefully before Vercel kills us
+    if (Date.now() - startTime > timeBudgetMs) {
+      console.log(`[enrich] Time budget exhausted after ${enriched} prospects — remaining campaigns will be picked up next cycle`);
+      break;
+    }
+
     let startingAfter: string | undefined;
 
     while (true) {
+      // Time-budget check inside pagination loop too
+      if (Date.now() - startTime > timeBudgetMs) break;
+
       try {
         const body: Record<string, unknown> = {
           campaign_id: campaign.id,

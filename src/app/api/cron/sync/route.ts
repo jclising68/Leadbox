@@ -95,10 +95,13 @@ export async function GET(req: NextRequest) {
           `[cron] ${integration.provider} ${integration.id}: ${result.synced} synced, ${result.skipped} skipped, ${result.errors} errors`
         );
 
-        // Auto-enrich Instantly after sync
-        if (integration.provider === "INSTANTLY" && result.synced > 0) {
+        // Auto-enrich Instantly after EVERY sync — lead statuses change
+        // on the provider side (e.g., lead marks Interested) even when
+        // no new messages arrive, so we need to pick those up continuously.
+        if (integration.provider === "INSTANTLY") {
           try {
-            await enrichFromInstantly(integration.id);
+            const remainingTime = MAX_DURATION_MS - (Date.now() - startTime);
+            await enrichFromInstantly(integration.id, Math.min(remainingTime, 120_000));
           } catch (err) {
             console.error(`[cron] Enrichment failed for ${integration.id}:`, err instanceof Error ? err.message : err);
           }

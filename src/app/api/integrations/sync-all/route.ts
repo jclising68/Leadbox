@@ -70,7 +70,9 @@ export async function POST(req: NextRequest) {
         console.log(
           `[sync-all] ${integration.provider} ${integration.id}: ${result.synced} synced, ${result.skipped} skipped, ${result.errors} errors`
         );
-        if (integration.provider === "INSTANTLY" && result.synced > 0) {
+        // Always enrich Instantly — lead statuses change on the provider
+        // side even when no new messages arrive.
+        if (integration.provider === "INSTANTLY") {
           try {
             await enrichFromInstantly(integration.id);
           } catch (err) {
