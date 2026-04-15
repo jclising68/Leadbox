@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
   const dateFrom = url.searchParams.get("dateFrom");
   const dateTo = url.searchParams.get("dateTo");
   const hasReply = url.searchParams.get("hasReply");
+  const sortDir = url.searchParams.get("sortDir") === "asc" ? "asc" : "desc";
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 100);
 
   const where: Prisma.ThreadWhereInput = {
@@ -84,7 +85,7 @@ export async function GET(req: NextRequest) {
       threadLabels: { include: { label: true } },
       _count: { select: { messages: true } },
     },
-    orderBy: { lastMessageAt: "desc" },
+    orderBy: { lastMessageAt: sortDir },
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   });

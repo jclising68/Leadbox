@@ -79,7 +79,25 @@ function formatDate(date: string | null) {
   if (!date) return "-";
   const d = new Date(date);
   if (isNaN(d.getTime())) return "-";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+}
+
+function formatFullDateTime(date: string | null) {
+  if (!date) return "";
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function CopyCell({ value, className }: { value: string; className?: string }) {
@@ -663,7 +681,7 @@ export default function LeadsPage() {
                 >
                   {/* Date */}
                   <div className="shrink-0 px-3 text-xs text-muted-foreground" style={{ width: `${COLUMNS[0].w}px` }}>
-                    {formatDate(displayDate)}
+                    <span title={formatFullDateTime(displayDate)}>{formatDate(displayDate)}</span>
                   </div>
 
                   {/* Provider icon */}

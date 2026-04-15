@@ -17,6 +17,7 @@ type InboxStore = {
   filterHasReply: boolean;
   filterDateFrom: string | null;
   filterDateTo: string | null;
+  sortDir: "desc" | "asc";
   setView: (view: InboxView) => void;
   setSelectedThread: (id: string | null) => void;
   setSelectedLabel: (id: string | null) => void;
@@ -28,6 +29,7 @@ type InboxStore = {
   setFilterHasReply: (h: boolean) => void;
   setFilterDateFrom: (d: string | null) => void;
   setFilterDateTo: (d: string | null) => void;
+  setSortDir: (d: "desc" | "asc") => void;
   clearFilters: () => void;
 };
 
@@ -45,6 +47,7 @@ export const useInboxStore = create<InboxStore>()(
       filterHasReply: false,
       filterDateFrom: null,
       filterDateTo: null,
+      sortDir: "desc",
       setView: (view) => set({ view, selectedLabelId: null }),
       setSelectedThread: (id) => set({ selectedThreadId: id }),
       setSelectedLabel: (id) => set({ selectedLabelId: id, view: "ALL" }),
@@ -56,6 +59,7 @@ export const useInboxStore = create<InboxStore>()(
       setFilterHasReply: (h) => set({ filterHasReply: h }),
       setFilterDateFrom: (d) => set({ filterDateFrom: d }),
       setFilterDateTo: (d) => set({ filterDateTo: d }),
+      setSortDir: (d) => set({ sortDir: d }),
       clearFilters: () => set({ filterChannel: null, filterCampaign: null, filterUnread: false, filterHasReply: false, filterDateFrom: null, filterDateTo: null, searchQuery: "" }),
     }),
     {

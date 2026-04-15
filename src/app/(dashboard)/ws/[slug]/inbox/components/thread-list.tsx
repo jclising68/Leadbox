@@ -5,7 +5,7 @@ import { useInboxStore } from "@/stores/inbox-store";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Mail, Link2, Loader2, Filter, X, SlidersHorizontal, Zap, Send, RefreshCw, Search } from "lucide-react";
+import { Mail, Link2, Loader2, Filter, X, SlidersHorizontal, Zap, Send, RefreshCw, Search, ArrowDownNarrowWide, ArrowUpNarrowWide } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useEffect, useMemo, useState } from "react";
@@ -41,6 +41,7 @@ export function ThreadList() {
     filterHasReply, setFilterHasReply,
     filterDateFrom, setFilterDateFrom,
     filterDateTo, setFilterDateTo,
+    sortDir, setSortDir,
     searchQuery, setSearchQuery,
     clearFilters,
   } = useInboxStore();
@@ -144,6 +145,18 @@ export function ThreadList() {
               title="Pull latest from Instantly / HeyReach"
             >
               <RefreshCw className={cn("h-3.5 w-3.5", isSyncing && "animate-spin")} />
+            </button>
+            <button
+              onClick={() => setSortDir(sortDir === "desc" ? "asc" : "desc")}
+              className={cn(
+                "flex items-center justify-center w-6 h-6 rounded transition-colors",
+                sortDir === "asc"
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              title={sortDir === "desc" ? "Sorted: newest first (click for oldest)" : "Sorted: oldest first (click for newest)"}
+            >
+              {sortDir === "desc" ? <ArrowDownNarrowWide className="h-3.5 w-3.5" /> : <ArrowUpNarrowWide className="h-3.5 w-3.5" />}
             </button>
             <button
               onClick={() => setShowFilters(!showFilters)}
