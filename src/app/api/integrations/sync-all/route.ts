@@ -9,6 +9,9 @@ export const maxDuration = 300;
 
 // Skip a sync if the integration was synced this recently
 const FRESH_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
+// Treat sync locks older than this as stale (after() may have been killed).
+// Slightly above Vercel's 300s maxDuration so legit long syncs aren't aborted.
+const STALE_LOCK_MS = 6 * 60 * 1000; // 6 minutes
 
 /**
  * Trigger background sync for every active integration in the workspace.
@@ -33,10 +36,18 @@ export async function POST(req: NextRequest) {
   for (const integration of integrations) {
     const config = (integration.config as Record<string, unknown>) ?? {};
 
-    // Already syncing — skip
+    // Already syncing — skip, but recover stale locks (function killed
+    // mid-run on Vercel without running `finally`).
     if (config.syncRunning) {
-      skipped.push(integration.id);
-      continue;
+      const startedAt = config.syncStartedAt as string | undefined;
+      const elapsed = startedAt ? Date.now() - new Date(startedAt).getTime() : Infinity;
+      if (elapsed < STALE_LOCK_MS) {
+        skipped.push(integration.id);
+        continue;
+      }
+      // Stale — fall through to re-trigger after clearing
+      delete config.syncRunning;
+      delete config.syncStartedAt;
     }
 
     // Synced very recently — skip to avoid hammering provider APIs

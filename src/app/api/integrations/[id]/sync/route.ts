@@ -28,7 +28,7 @@ async function isSyncRunning(integrationId: string): Promise<boolean> {
   const startedAt = config.syncStartedAt as string | undefined;
   if (startedAt) {
     const elapsed = Date.now() - new Date(startedAt).getTime();
-    if (elapsed > 2 * 60 * 1000) return false; // Stale — allow restart
+    if (elapsed > 6 * 60 * 1000) return false; // Stale — allow restart (>Vercel 300s maxDuration)
   }
 
   return true;
@@ -152,11 +152,13 @@ export async function GET(
 
   const config = (integration.config as Record<string, unknown>) ?? {};
 
-  // Treat locks older than 2 minutes as stale (after() may have been killed)
+  // Treat locks older than 6 minutes as stale (after() may have been killed).
+  // Slightly above Vercel's 300s maxDuration so legit long syncs aren't
+  // misreported as finished.
   let syncing = !!config.syncRunning;
   if (syncing && config.syncStartedAt) {
     const elapsed = Date.now() - new Date(config.syncStartedAt as string).getTime();
-    if (elapsed > 2 * 60 * 1000) syncing = false;
+    if (elapsed > 6 * 60 * 1000) syncing = false;
   }
 
   return workspaceJson({

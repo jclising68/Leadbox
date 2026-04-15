@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
       if (config.syncRunning) {
         const startedAt = config.syncStartedAt as string | undefined;
         const elapsed = startedAt ? Date.now() - new Date(startedAt).getTime() : Infinity;
-        if (elapsed < 5 * 60 * 1000) {
+        if (elapsed < 6 * 60 * 1000) {
           console.log(`[cron] Skipping ${integration.id} — sync running (${Math.round(elapsed / 1000)}s)`);
           continue;
         }
