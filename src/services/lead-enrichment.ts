@@ -152,7 +152,9 @@ export async function enrichFromInstantly(
 
   console.log(`[enrich] Starting enrichment for integration ${integrationId} (budget: ${Math.round(timeBudgetMs / 1000)}s)`);
 
-  // 1. Get all campaigns
+  // 1. Get campaigns once for name lookup. Limit 100 covers any realistic
+  //    workspace; we only use these names to populate `campaignName` on the
+  //    prospect, not to drive iteration anymore.
   const campaignData = await rateLimitedGet(apiKey, "/campaigns", { limit: "100" });
   const campaigns = (campaignData.items || []) as { id: string; name: string }[];
   console.log(`[enrich] Found ${campaigns.length} campaigns`);
@@ -160,15 +162,31 @@ export async function enrichFromInstantly(
   const campaignNameMap = new Map<string, string>();
   for (const c of campaigns) campaignNameMap.set(c.id, c.name);
 
-  let enriched = 0;
-  let errors = 0;
-
-  // Pre-fetch all prospects and labels for this workspace to avoid N+1 queries.
-  // This turns thousands of individual DB calls into 2 bulk queries.
-  const allProspects = await prisma.prospect.findMany({
+  // 2. Pre-fetch labels.
+  const allLabels = await prisma.label.findMany({
     where: { workspaceId },
+    select: { id: true, name: true },
+  });
+  const labelByName = new Map(
+    allLabels.map((l) => [l.name.toLowerCase(), l])
+  );
+
+  // 3. Fetch only EMAIL-channel prospects (Instantly conversations live there;
+  //    HeyReach prospects can have an email too but they aren't in Instantly).
+  //    Order by `updatedAt ASC` so the stalest prospects are refreshed first —
+  //    over multiple cron cycles this guarantees every prospect eventually
+  //    gets enriched even when a workspace has more prospects than the time
+  //    budget can cover in one run.
+  const prospects = await prisma.prospect.findMany({
+    where: {
+      workspaceId,
+      email: { not: null },
+      thread: { channel: "EMAIL" },
+    },
     select: {
-      id: true, email: true, notes: true,
+      id: true,
+      email: true,
+      notes: true,
       thread: {
         select: {
           id: true,
@@ -181,156 +199,136 @@ export async function enrichFromInstantly(
         },
       },
     },
+    orderBy: { updatedAt: "asc" },
   });
-  const prospectByEmail = new Map(
-    allProspects.filter((p) => p.email).map((p) => [p.email!.toLowerCase(), p])
-  );
 
-  const allLabels = await prisma.label.findMany({
-    where: { workspaceId },
-    select: { id: true, name: true },
-  });
-  const labelByName = new Map(
-    allLabels.map((l) => [l.name.toLowerCase(), l])
-  );
+  console.log(`[enrich] ${prospects.length} email-channel prospects to refresh`);
 
-  // 2. For each campaign, fetch all leads
-  for (const campaign of campaigns) {
-    // Time-budget check — stop gracefully before Vercel kills us
+  let enriched = 0;
+  let errors = 0;
+  let processed = 0;
+
+  // 4. For each prospect, look up their lead in Instantly via search.
+  //    This is O(prospects) — the previous campaign-walking approach was
+  //    O(all_instantly_leads) and timed out before reaching most prospects.
+  for (const prospect of prospects) {
     if (Date.now() - startTime > timeBudgetMs) {
-      console.log(`[enrich] Time budget exhausted after ${enriched} prospects — remaining campaigns will be picked up next cycle`);
+      console.log(`[enrich] Time budget exhausted at ${processed}/${prospects.length} prospects (${enriched} enriched)`);
       break;
     }
+    if (!prospect.email) continue;
 
-    let startingAfter: string | undefined;
+    processed++;
 
-    while (true) {
-      // Time-budget check inside pagination loop too
-      if (Date.now() - startTime > timeBudgetMs) break;
+    try {
+      const data = await rateLimitedPost(apiKey, "/leads/list", {
+        search: prospect.email,
+        limit: 10,
+      });
+      const items = (data.items || []) as InstantlyLead[];
 
-      try {
-        const body: Record<string, unknown> = {
-          campaign_id: campaign.id,
-          limit: 100,
-        };
-        if (startingAfter) body.starting_after = startingAfter;
+      // Pick the exact email match — `search` can return fuzzy matches.
+      const lead = items.find(
+        (l) => l.email?.toLowerCase() === prospect.email!.toLowerCase()
+      );
+      if (!lead) continue;
 
-        const data = await rateLimitedPost(apiKey, "/leads/list", body);
-        const leads = (data.items || []) as InstantlyLead[];
+      // Map interest status (takes priority) or fallback to campaign status
+      const interestLabel =
+        lead.lt_interest_status !== undefined && lead.lt_interest_status >= 0
+          ? INTEREST_STATUS_MAP[lead.lt_interest_status]
+          : undefined;
+      const statusLabel =
+        interestLabel || getCampaignStatus(lead.status, lead.email_reply_count);
 
-        if (leads.length === 0) break;
+      // Determine step replied
+      let stepReplied: string | undefined;
+      if (lead.email_reply_count && lead.email_reply_count > 0) {
+        stepReplied = `Step ${(lead.email_opened_step || 0) + 1}`;
+      }
 
-        // Batch update prospects
-        for (const lead of leads) {
-          if (!lead.email) continue;
+      const updateData: Record<string, unknown> = {};
+      if (lead.first_name) updateData.firstName = lead.first_name;
+      if (lead.last_name) updateData.lastName = lead.last_name;
+      if (lead.company_name) updateData.company = lead.company_name;
+      if (lead.company_domain) updateData.domain = lead.company_domain;
+      if (lead.phone) updateData.phone = lead.phone;
+      updateData.leadStatus = statusLabel;
+      if (lead.campaign && campaignNameMap.has(lead.campaign)) {
+        updateData.campaignName = campaignNameMap.get(lead.campaign);
+      }
+      if (stepReplied) updateData.stepReplied = stepReplied;
 
-          try {
-            // Map interest status (takes priority) or fallback to campaign status
-            const interestLabel = (lead.lt_interest_status !== undefined && lead.lt_interest_status >= 0)
-              ? INTEREST_STATUS_MAP[lead.lt_interest_status]
-              : undefined;
-            const statusLabel = interestLabel || getCampaignStatus(lead.status, lead.email_reply_count);
+      if (lead.timestamp_created) {
+        updateData.sourceDate = new Date(lead.timestamp_created);
+      }
 
-            // Determine step replied
-            let stepReplied: string | undefined;
-            if (lead.email_reply_count && lead.email_reply_count > 0) {
-              stepReplied = `Step ${(lead.email_opened_step || 0) + 1}`;
-            }
+      // Extract title from payload if available
+      const payload = lead.payload || {};
+      if (payload.title || payload.Title || payload.jobTitle || payload.job_title) {
+        updateData.title = (payload.title || payload.Title || payload.jobTitle || payload.job_title) as string;
+      }
+      if (payload.phone || payload.Phone || payload.phoneNumber) {
+        updateData.phone = (updateData.phone as string | undefined) || (payload.phone || payload.Phone || payload.phoneNumber) as string;
+      }
 
-            const updateData: Record<string, unknown> = {};
-            if (lead.first_name) updateData.firstName = lead.first_name;
-            if (lead.last_name) updateData.lastName = lead.last_name;
-            if (lead.company_name) updateData.company = lead.company_name;
-            if (lead.company_domain) updateData.domain = lead.company_domain;
-            if (lead.phone) updateData.phone = lead.phone;
-            updateData.leadStatus = statusLabel;
-            updateData.campaignName = campaign.name;
-            if (stepReplied) updateData.stepReplied = stepReplied;
-
-            // Save original date from Instantly
-            if (lead.timestamp_created) {
-              updateData.sourceDate = new Date(lead.timestamp_created);
-            }
-
-            // Extract title from payload if available
-            const payload = lead.payload || {};
-            if (payload.title || payload.Title || payload.jobTitle || payload.job_title) {
-              updateData.title = (payload.title || payload.Title || payload.jobTitle || payload.job_title) as string;
-            }
-            if (payload.phone || payload.Phone || payload.phoneNumber) {
-              updateData.phone = updateData.phone || (payload.phone || payload.Phone || payload.phoneNumber) as string;
-            }
-
-            // Use pre-fetched prospect data instead of per-lead DB query
-            const prospect = prospectByEmail.get(lead.email.toLowerCase());
-
-            // Set notes to latest reply if not already set
-            if (prospect && !prospect.notes) {
-              const latestReply = prospect.thread?.messages?.[0];
-              if (latestReply) {
-                const replyText = latestReply.bodyText || latestReply.messageText;
-                if (replyText) {
-                  updateData.notes = replyText.slice(0, 500);
-                }
-              }
-            }
-
-            // Only update if we have something new and prospect exists
-            if (Object.keys(updateData).length > 0 && prospect) {
-              await prisma.prospect.update({
-                where: { workspaceId_email: { workspaceId, email: lead.email } },
-                data: updateData,
-              });
-              enriched++;
-            }
-
-            // Apply interest label — auto-create the label if it doesn't
-            // exist yet (e.g. new workspace, or Instantly added a new status).
-            if (interestLabel && prospect?.thread) {
-              let label = labelByName.get(interestLabel.toLowerCase());
-              if (!label) {
-                label = await prisma.label.upsert({
-                  where: {
-                    workspaceId_name: { workspaceId, name: interestLabel },
-                  },
-                  create: {
-                    workspaceId,
-                    name: interestLabel,
-                    color: colorForStatus(interestLabel),
-                  },
-                  update: {},
-                  select: { id: true, name: true },
-                });
-                labelByName.set(interestLabel.toLowerCase(), label);
-              }
-              await prisma.threadLabel.upsert({
-                where: {
-                  threadId_labelId: { threadId: prospect.thread.id, labelId: label.id },
-                },
-                create: {
-                  threadId: prospect.thread.id,
-                  labelId: label.id,
-                  source: "WEBHOOK",
-                  confidence: 1.0,
-                },
-                update: {},
-              });
-            }
-          } catch {
-            errors++;
+      // Set notes to latest reply if not already set
+      if (!prospect.notes) {
+        const latestReply = prospect.thread?.messages?.[0];
+        if (latestReply) {
+          const replyText = latestReply.bodyText || latestReply.messageText;
+          if (replyText) {
+            updateData.notes = replyText.slice(0, 500);
           }
         }
+      }
 
-        startingAfter = (data.next_starting_after as string) || undefined;
-        if (!startingAfter || leads.length < 100) break;
-      } catch (err) {
-        console.error(`[enrich] Error fetching leads for campaign ${campaign.name}:`, err instanceof Error ? err.message : err);
-        errors++;
-        break;
+      await prisma.prospect.update({
+        where: { workspaceId_email: { workspaceId, email: prospect.email } },
+        data: updateData,
+      });
+      enriched++;
+
+      // Apply interest label — auto-create the label if it doesn't exist
+      // yet (e.g. new workspace, or Instantly added a new status).
+      if (interestLabel && prospect.thread) {
+        let label = labelByName.get(interestLabel.toLowerCase());
+        if (!label) {
+          label = await prisma.label.upsert({
+            where: {
+              workspaceId_name: { workspaceId, name: interestLabel },
+            },
+            create: {
+              workspaceId,
+              name: interestLabel,
+              color: colorForStatus(interestLabel),
+            },
+            update: {},
+            select: { id: true, name: true },
+          });
+          labelByName.set(interestLabel.toLowerCase(), label);
+        }
+        await prisma.threadLabel.upsert({
+          where: {
+            threadId_labelId: { threadId: prospect.thread.id, labelId: label.id },
+          },
+          create: {
+            threadId: prospect.thread.id,
+            labelId: label.id,
+            source: "WEBHOOK",
+            confidence: 1.0,
+          },
+          update: {},
+        });
+      }
+    } catch (err) {
+      errors++;
+      if (errors <= 3) {
+        console.error(`[enrich] Error for ${prospect.email}:`, err instanceof Error ? err.message : err);
       }
     }
   }
 
-  console.log(`[enrich] Done: ${enriched} enriched, ${campaigns.length} campaigns, ${errors} errors`);
+  console.log(`[enrich] Done: ${enriched}/${processed} enriched, ${campaigns.length} campaigns, ${errors} errors`);
   return { enriched, campaigns: campaigns.length, errors };
 }
