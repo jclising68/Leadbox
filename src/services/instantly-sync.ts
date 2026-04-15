@@ -250,11 +250,13 @@ export async function syncInstantly(
   );
   console.log(`[sync] Fetched ${emails.length} emails from Instantly`);
 
-  // Sort chronologically so threads build in order
+  // Sort newest-first so the most recent data appears immediately.
+  // The thread resolver handles out-of-order processing correctly
+  // (only updates lastMessageAt/snippet if the message is newer).
   emails.sort((a, b) => {
     const da = new Date(a.timestamp_created || 0).getTime();
     const db = new Date(b.timestamp_created || 0).getTime();
-    return da - db;
+    return db - da;
   });
 
   const newEmails = emails.filter((e) => !existingIds.has(e.id) && (e.lead || e.from_address_email || e.to_address_email_list));

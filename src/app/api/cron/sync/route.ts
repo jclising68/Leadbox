@@ -47,21 +47,38 @@ export async function GET(req: NextRequest) {
 
       // Skip if manual sync is running (but recover stale locks > 5 min)
       const config = (integration.config as Record<string, unknown>) ?? {};
+      let needsConfigUpdate = false;
+
+      // Recover stale sync locks (> 5 min)
       if (config.syncRunning) {
         const startedAt = config.syncStartedAt as string | undefined;
         const elapsed = startedAt ? Date.now() - new Date(startedAt).getTime() : Infinity;
-        if (elapsed < 2 * 60 * 1000) {
-          console.log(`[cron] Skipping ${integration.id} — manual sync running`);
+        if (elapsed < 5 * 60 * 1000) {
+          console.log(`[cron] Skipping ${integration.id} — sync running (${Math.round(elapsed / 1000)}s)`);
           continue;
         }
-        // Stale lock — clean it up
         console.log(`[cron] Clearing stale sync lock on ${integration.id} (${Math.round(elapsed / 1000)}s old)`);
-        const c = { ...config };
-        delete c.syncRunning;
-        delete c.syncStartedAt;
+        delete config.syncRunning;
+        delete config.syncStartedAt;
+        needsConfigUpdate = true;
+      }
+
+      // Recover stale enrich locks (> 10 min)
+      if (config.enrichRunning) {
+        const startedAt = config.enrichStartedAt as string | undefined;
+        const elapsed = startedAt ? Date.now() - new Date(startedAt).getTime() : Infinity;
+        if (elapsed > 10 * 60 * 1000) {
+          console.log(`[cron] Clearing stale enrich lock on ${integration.id} (${Math.round(elapsed / 1000)}s old)`);
+          delete config.enrichRunning;
+          delete config.enrichStartedAt;
+          needsConfigUpdate = true;
+        }
+      }
+
+      if (needsConfigUpdate) {
         await prisma.integration.update({
           where: { id: integration.id },
-          data: { config: c as object },
+          data: { config: config as object },
         });
       }
 

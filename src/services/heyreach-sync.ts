@@ -278,7 +278,8 @@ export async function syncHeyreach(
     }
   }
 
-  allPayloads.sort((a, b) => (a.sentAt?.getTime() || 0) - (b.sentAt?.getTime() || 0));
+  // Sort newest-first so recent data appears immediately
+  allPayloads.sort((a, b) => (b.sentAt?.getTime() || 0) - (a.sentAt?.getTime() || 0));
   console.log(`[heyreach] Processing ${allPayloads.length} messages...`);
 
   // 2b. Batch dedup — fetch existing externalIds from recent messages only.

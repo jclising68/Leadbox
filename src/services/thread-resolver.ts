@@ -149,21 +149,23 @@ export async function resolveThread(
       },
     });
 
-    // 5. Update thread — only set channel on new threads, not on updates
+    // 5. Update thread — only update snippet/lastMessageAt if this message
+    //    is newer than what's already on the thread (supports out-of-order processing)
     const snippet =
       payload.bodyText?.slice(0, 200) ||
       payload.messageText?.slice(0, 200) ||
       payload.subject ||
       "";
 
+    const msgTime = payload.sentAt || new Date();
+    const isNewer = !thread.lastMessageAt || msgTime > thread.lastMessageAt;
+
     await tx.thread.update({
       where: { id: thread.id },
       data: {
-        snippet,
-        lastMessageAt: payload.sentAt || new Date(),
+        ...(isNewer ? { snippet, lastMessageAt: msgTime } : {}),
         messageCount: { increment: 1 },
         isUnread: payload.direction === "INBOUND" ? true : undefined,
-        ...(isNewThread ? {} : {}), // channel already set on creation
       },
     });
 
