@@ -10,17 +10,22 @@ const MIN_REQUEST_GAP_MS = 1000; // Match sync rate — 1 req/sec is safely unde
 // API key — each Instantly account has its own quota anyway.
 const lastRequestByKey = new Map<string, number>();
 
-// Instantly lt_interest_status mapping
+// Instantly `lt_interest_status` mapping.
+//
+// Reference: https://developer.instantly.ai — confirmed against /leads/list
+// responses in production. Positive values are "soft" (the lead expressed
+// interest), negatives are "hard" (won't proceed). `0` means "not set" and
+// must NOT be mapped (was previously mis-mapped to "Not Interested", which
+// would have flooded the inbox once the guard was relaxed).
 const INTEREST_STATUS_MAP: Record<number, string> = {
-  0: "Not Interested",
   1: "Interested",
   2: "Meeting Booked",
   3: "Meeting Completed",
   4: "Closed",
-  5: "Out of Office",
-  6: "Wrong Person",
-  7: "Auto Reply",
-  8: "Not the right time",
+  [-1]: "Not Interested",
+  [-2]: "Wrong Person",
+  [-3]: "Lost",
+  [-4]: "Out of Office",
 };
 
 // Pick a sensible default color for an auto-created label based on its name.
@@ -126,7 +131,7 @@ type InstantlyLead = {
   company_domain?: string;
   phone?: string;
   website?: string;
-  lt_interest_status?: number;
+  lt_interest_status?: number | null;
   status?: number;
   campaign?: string;
   payload?: Record<string, unknown>;
@@ -134,7 +139,11 @@ type InstantlyLead = {
   email_opened_step?: number;
   timestamp_created?: string;
   timestamp_last_contact?: string;
+  /** UUIDs of custom tags assigned to this lead (manual tags from Instantly UI). */
+  custom_tag_ids?: string[];
 };
+
+type InstantlyCustomTag = { id: string; label: string };
 
 export async function enrichFromInstantly(
   integrationId: string,
@@ -164,6 +173,21 @@ export async function enrichFromInstantly(
 
   const campaignNameMap = new Map<string, string>();
   for (const c of campaigns) campaignNameMap.set(c.id, c.name);
+
+  // 1b. Pre-fetch custom tags — these are the free-form tags applied in
+  //    Instantly's UI (separate from the Status dropdown's lt_interest_status).
+  //    We map id → label so we can translate lead.custom_tag_ids back to names
+  //    and apply them on the thread. Without this, anything the user tagged
+  //    manually in Instantly would never reflect in LeadBox.
+  const customTagById = new Map<string, string>();
+  try {
+    const tagsData = await rateLimitedGet(apiKey, "/custom-tags", { limit: "100" });
+    const tagItems = (tagsData.items || []) as InstantlyCustomTag[];
+    for (const t of tagItems) customTagById.set(t.id, t.label);
+    console.log(`[enrich] Loaded ${customTagById.size} custom tags from Instantly`);
+  } catch (err) {
+    console.warn(`[enrich] Failed to load custom tags (continuing without):`, err instanceof Error ? err.message : err);
+  }
 
   // 2. Pre-fetch labels.
   const allLabels = await prisma.label.findMany({
@@ -236,13 +260,30 @@ export async function enrichFromInstantly(
       );
       if (!lead) continue;
 
-      // Map interest status (takes priority) or fallback to campaign status
+      // Map interest status. `0`/null/undefined mean "not set" — only look
+      // up labels for known values. Previously the `>= 0` guard was dropping
+      // every Not Interested (-1), Wrong Person (-2), Lost (-3), and Out of
+      // Office (-4), which is why those statuses never reflected in LeadBox.
+      const rawInterest = lead.lt_interest_status;
       const interestLabel =
-        lead.lt_interest_status !== undefined && lead.lt_interest_status >= 0
-          ? INTEREST_STATUS_MAP[lead.lt_interest_status]
+        rawInterest !== undefined && rawInterest !== null && rawInterest !== 0
+          ? INTEREST_STATUS_MAP[rawInterest]
           : undefined;
+      // Surface unknown codes in logs so we can expand the map rather than
+      // silently dropping data. (Keeps volume low — only logs if non-zero
+      // and unmapped.)
+      if (rawInterest !== undefined && rawInterest !== null && rawInterest !== 0 && !interestLabel) {
+        console.warn(`[enrich] Unknown lt_interest_status=${rawInterest} for ${prospect.email}`);
+      }
       const statusLabel =
         interestLabel || getCampaignStatus(lead.status, lead.email_reply_count);
+
+      // Resolve any manually-applied custom tags from Instantly UI.
+      // These coexist with the Status dropdown, so a lead can have both
+      // an interest status AND additional free-form tags.
+      const customTagLabels = (lead.custom_tag_ids ?? [])
+        .map((id) => customTagById.get(id))
+        .filter((name): name is string => !!name);
 
       // Determine step replied
       let stepReplied: string | undefined;
@@ -292,37 +333,48 @@ export async function enrichFromInstantly(
       });
       enriched++;
 
-      // Apply interest label — auto-create the label if it doesn't exist
-      // yet (e.g. new workspace, or Instantly added a new status).
-      if (interestLabel && prospect.thread) {
-        let label = labelByName.get(interestLabel.toLowerCase());
-        if (!label) {
-          label = await prisma.label.upsert({
+      // Apply all labels that came from Instantly — interest status + any
+      // manual custom tags. De-duped case-insensitively so a tag named
+      // "Interested" doesn't also get applied as a separate "INTERESTED".
+      if (prospect.thread) {
+        const labelsToApply = new Map<string, string>(); // lowercaseKey -> originalName
+        if (interestLabel) {
+          labelsToApply.set(interestLabel.toLowerCase(), interestLabel);
+        }
+        for (const tagName of customTagLabels) {
+          labelsToApply.set(tagName.toLowerCase(), tagName);
+        }
+
+        for (const [lowerKey, labelName] of labelsToApply) {
+          let label = labelByName.get(lowerKey);
+          if (!label) {
+            label = await prisma.label.upsert({
+              where: {
+                workspaceId_name: { workspaceId, name: labelName },
+              },
+              create: {
+                workspaceId,
+                name: labelName,
+                color: colorForStatus(labelName),
+              },
+              update: {},
+              select: { id: true, name: true },
+            });
+            labelByName.set(lowerKey, label);
+          }
+          await prisma.threadLabel.upsert({
             where: {
-              workspaceId_name: { workspaceId, name: interestLabel },
+              threadId_labelId: { threadId: prospect.thread.id, labelId: label.id },
             },
             create: {
-              workspaceId,
-              name: interestLabel,
-              color: colorForStatus(interestLabel),
+              threadId: prospect.thread.id,
+              labelId: label.id,
+              source: "WEBHOOK",
+              confidence: 1.0,
             },
             update: {},
-            select: { id: true, name: true },
           });
-          labelByName.set(interestLabel.toLowerCase(), label);
         }
-        await prisma.threadLabel.upsert({
-          where: {
-            threadId_labelId: { threadId: prospect.thread.id, labelId: label.id },
-          },
-          create: {
-            threadId: prospect.thread.id,
-            labelId: label.id,
-            source: "WEBHOOK",
-            confidence: 1.0,
-          },
-          update: {},
-        });
       }
     } catch (err) {
       errors++;
