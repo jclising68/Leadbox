@@ -277,9 +277,9 @@ function StatusCell({
             {display}
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <ChevronDown className="h-3 w-3 opacity-40 group-hover/status:opacity-100" />
-            Set status
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-dashed border-muted-foreground/30 text-[10px] text-muted-foreground hover:border-muted-foreground/60 hover:text-foreground transition-colors">
+            <ChevronDown className="h-3 w-3" />
+            Set tag
           </span>
         )}
       </DropdownMenuTrigger>
