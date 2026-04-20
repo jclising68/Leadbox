@@ -5,9 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { useWorkspaces } from "@/hooks/use-workspace";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -30,8 +28,49 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { toast } from "sonner";
-import { Plus, Loader2, Trash2, UserPlus, X, AlertCircle, Pencil } from "lucide-react";
+import {
+  Plus,
+  Loader2,
+  Trash2,
+  UserPlus,
+  X,
+  Sparkles,
+  Pencil,
+  ChevronsUpDown,
+  Lock,
+} from "lucide-react";
+
+function initials(name: string | null | undefined, email: string) {
+  const source = (name || email).trim();
+  const parts = source.split(/[\s@._-]+/).filter(Boolean);
+  const chars = (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "");
+  return chars.toUpperCase() || source.slice(0, 2).toUpperCase();
+}
+
+const roleStyles: Record<string, string> = {
+  OWNER:
+    "bg-amber-500/10 text-amber-600 dark:text-amber-300 ring-1 ring-inset ring-amber-500/30",
+  ADMIN:
+    "bg-sky-500/10 text-sky-600 dark:text-sky-300 ring-1 ring-inset ring-sky-500/30",
+  MEMBER:
+    "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 ring-1 ring-inset ring-emerald-500/30",
+  VIEWER:
+    "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
+};
 
 function headers(wId: string) {
   return { "x-workspace-id": wId, "Content-Type": "application/json" };
@@ -45,6 +84,12 @@ type UnassignedUser = {
   createdAt: string;
   memberships: { workspace: { id: string; name: string } }[];
 };
+type AddableUser = {
+  id: string;
+  email: string;
+  name: string | null;
+  memberships: { workspace: { id: string; name: string } }[];
+};
 
 export default function MembersPage() {
   const workspaceId = useCurrentWorkspaceId();
@@ -54,6 +99,7 @@ export default function MembersPage() {
   const [role, setRole] = useState("MEMBER");
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<string[]>([]);
   const [lockedWorkspaceIds, setLockedWorkspaceIds] = useState<string[]>([]);
+  const [emailPickerOpen, setEmailPickerOpen] = useState(false);
   const [dismissedUserIds, setDismissedUserIds] = useState<Set<string>>(new Set());
   const [editingMember, setEditingMember] = useState<{
     userId: string;
@@ -101,6 +147,19 @@ export default function MembersPage() {
     },
     enabled: !!workspaceId,
     refetchInterval: 60000, // Check every minute
+  });
+
+  const { data: addableUsers } = useQuery({
+    queryKey: ["addable-users", workspaceId],
+    queryFn: async () => {
+      const res = await fetch("/api/users/addable", {
+        headers: headers(workspaceId!),
+        cache: "no-store",
+      });
+      if (!res.ok) return [];
+      return res.json() as Promise<AddableUser[]>;
+    },
+    enabled: !!workspaceId && open,
   });
 
   const addMember = useMutation({
@@ -239,13 +298,6 @@ export default function MembersPage() {
     );
   }
 
-  const roleColor: Record<string, string> = {
-    OWNER: "text-yellow-500",
-    ADMIN: "text-blue-500",
-    MEMBER: "text-green-500",
-    VIEWER: "text-gray-500",
-  };
-
   const workspaces = (allWorkspaces?.workspaces || allWorkspaces || []) as Workspace[];
 
   // Filter out dismissed users
@@ -257,25 +309,35 @@ export default function MembersPage() {
     <div className="max-w-3xl">
       {/* Unassigned users notification */}
       {visibleUnassigned.length > 0 && (
-        <div className="mb-6 border border-amber-500/30 bg-amber-500/5 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <AlertCircle className="h-4 w-4 text-amber-500" />
-            <h3 className="text-sm font-medium">
-              New Registrations ({visibleUnassigned.length})
-            </h3>
-            <span className="text-xs text-muted-foreground">
-              These users registered but are not in this workspace yet
-            </span>
+        <div className="mb-6 rounded-xl border border-border/70 bg-card shadow-sm overflow-hidden">
+          <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border/70 bg-muted/40">
+            <div className="flex size-7 items-center justify-center rounded-full bg-amber-500/15 ring-1 ring-inset ring-amber-500/30">
+              <Sparkles className="h-3.5 w-3.5 text-amber-600 dark:text-amber-300" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-semibold text-foreground">
+                New registrations
+                <span className="ml-1.5 text-muted-foreground font-normal">
+                  ({visibleUnassigned.length})
+                </span>
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Users who signed up but haven&apos;t been placed in any workspace yet
+              </p>
+            </div>
           </div>
-          <div className="space-y-2">
+          <div className="divide-y divide-border/70">
             {visibleUnassigned.map((user) => (
               <div
                 key={user.id}
-                className="flex items-center justify-between bg-background rounded-md border px-3 py-2"
+                className="flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors"
               >
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-medium text-xs">
+                  {initials(user.name, user.email)}
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium truncate">
+                    <span className="text-sm font-medium truncate text-foreground">
                       {user.name || user.email}
                     </span>
                     {user.name && (
@@ -284,22 +346,15 @@ export default function MembersPage() {
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-muted-foreground">
-                      Registered {new Date(user.createdAt).toLocaleDateString()}
-                    </span>
-                    {user.memberships.length > 0 && (
-                      <span className="text-[10px] text-muted-foreground">
-                        In: {user.memberships.map((m) => m.workspace.name).join(", ")}
-                      </span>
-                    )}
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    Registered {new Date(user.createdAt).toLocaleDateString()}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 ml-3 shrink-0">
                   <Button
                     size="sm"
-                    variant="outline"
-                    className="h-7 text-xs gap-1"
+                    variant="default"
+                    className="h-8 text-xs gap-1.5"
                     onClick={() =>
                       openAddDialog(
                         user.email,
@@ -307,19 +362,19 @@ export default function MembersPage() {
                       )
                     }
                   >
-                    <UserPlus className="h-3 w-3" />
-                    Add
+                    <UserPlus className="h-3.5 w-3.5" />
+                    Assign
                   </Button>
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-7 w-7 p-0"
+                    className="h-8 w-8 p-0"
                     onClick={() =>
                       setDismissedUserIds((prev) => new Set([...prev, user.id]))
                     }
                     title="Dismiss"
                   >
-                    <X className="h-3 w-3 text-muted-foreground" />
+                    <X className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>
                 </div>
               </div>
@@ -351,12 +406,92 @@ export default function MembersPage() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Email</Label>
-                <Input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="colleague@company.com"
-                />
+                <Popover
+                  open={emailPickerOpen}
+                  onOpenChange={setEmailPickerOpen}
+                >
+                  <PopoverTrigger
+                    render={
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-muted/40 transition-colors"
+                      >
+                        <span className={email ? "text-foreground" : "text-muted-foreground"}>
+                          {email || "Pick a registered user or type an email"}
+                        </span>
+                        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      </button>
+                    }
+                  />
+                  <PopoverContent
+                    align="start"
+                    className="w-[min(calc(100vw-3rem),28rem)] p-0"
+                  >
+                    <Command>
+                      <CommandInput
+                        placeholder="Search users or type new email…"
+                        value={email}
+                        onValueChange={(v) => {
+                          setEmail(v);
+                          const match = (addableUsers || []).find(
+                            (u) => u.email.toLowerCase() === v.toLowerCase()
+                          );
+                          setLockedWorkspaceIds(
+                            match
+                              ? match.memberships.map((m) => m.workspace.id)
+                              : []
+                          );
+                        }}
+                      />
+                      <CommandList>
+                        <CommandEmpty>
+                          <div className="text-xs text-muted-foreground">
+                            {email
+                              ? "Not registered yet — they'll be invited."
+                              : "No registered users available."}
+                          </div>
+                        </CommandEmpty>
+                        {(addableUsers || []).length > 0 && (
+                          <CommandGroup heading="Registered users">
+                            {(addableUsers || []).map((u) => (
+                              <CommandItem
+                                key={u.id}
+                                value={`${u.email} ${u.name ?? ""}`}
+                                onSelect={() => {
+                                  setEmail(u.email);
+                                  setLockedWorkspaceIds(
+                                    u.memberships.map((m) => m.workspace.id)
+                                  );
+                                  setEmailPickerOpen(false);
+                                }}
+                              >
+                                <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-[10px] font-medium">
+                                  {initials(u.name, u.email)}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm font-medium truncate text-foreground">
+                                    {u.name || u.email}
+                                  </div>
+                                  {u.name && (
+                                    <div className="text-xs text-muted-foreground truncate">
+                                      {u.email}
+                                    </div>
+                                  )}
+                                </div>
+                                {u.memberships.length > 0 && (
+                                  <div className="text-[10px] text-muted-foreground shrink-0">
+                                    {u.memberships.length} workspace
+                                    {u.memberships.length > 1 ? "s" : ""}
+                                  </div>
+                                )}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        )}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="space-y-2">
                 <Label>Role</Label>
@@ -376,7 +511,7 @@ export default function MembersPage() {
                 <p className="text-xs text-muted-foreground">
                   Select which workspaces this member can access
                 </p>
-                <div className="border rounded-md max-h-48 overflow-y-auto">
+                <div className="rounded-md border border-border/70 bg-muted/20 max-h-48 overflow-y-auto divide-y divide-border/70">
                   {workspaces.length === 0 ? (
                     <div className="px-3 py-2 text-xs text-muted-foreground">
                       No workspaces found
@@ -387,9 +522,9 @@ export default function MembersPage() {
                       return (
                         <label
                           key={ws.id}
-                          className={`flex items-center gap-2.5 px-3 py-2 border-b last:border-b-0 ${
+                          className={`flex items-center gap-2.5 px-3 py-2.5 transition-colors ${
                             locked
-                              ? "opacity-60 cursor-not-allowed"
+                              ? "bg-muted/40 cursor-not-allowed"
                               : "hover:bg-muted/50 cursor-pointer"
                           }`}
                         >
@@ -400,15 +535,22 @@ export default function MembersPage() {
                               !locked && toggleWorkspace(ws.id)
                             }
                           />
-                          <span className="text-sm">{ws.name}</span>
-                          <span className="ml-auto flex items-center gap-1.5">
+                          <span
+                            className={`text-sm ${
+                              locked ? "text-muted-foreground" : "text-foreground"
+                            }`}
+                          >
+                            {ws.name}
+                          </span>
+                          <span className="ml-auto flex items-center gap-2">
                             {locked && (
-                              <span className="text-[10px] text-muted-foreground">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border">
+                                <Lock className="h-2.5 w-2.5" />
                                 already a member
                               </span>
                             )}
                             {ws.id === workspaceId && !locked && (
-                              <span className="text-[10px] text-muted-foreground">
+                              <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary ring-1 ring-inset ring-primary/20">
                                 current
                               </span>
                             )}
@@ -439,67 +581,96 @@ export default function MembersPage() {
 
       {isLoading ? (
         <div className="flex justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin" />
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Joined</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {members?.map(
-              (m: {
-                id: string;
-                role: string;
-                joinedAt: string;
-                user: { id: string; name: string | null; email: string };
-              }) => (
-                <TableRow key={m.id}>
-                  <TableCell className="font-medium">
-                    {m.user.name || "-"}
-                  </TableCell>
-                  <TableCell>{m.user.email}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className={roleColor[m.role]}>
-                      {m.role}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {new Date(m.joinedAt).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell>
-                    {m.role !== "OWNER" && (
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openEditDialog(m)}
-                          title="Edit member"
-                        >
-                          <Pencil className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeMember.mutate(m.user.id)}
-                          title="Remove member"
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+        <div className="rounded-xl border border-border/70 bg-card overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40 hover:bg-muted/40 border-b border-border/70">
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Member
+                </TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Role
+                </TableHead>
+                <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Joined
+                </TableHead>
+                <TableHead className="w-0"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {members?.map(
+                (m: {
+                  id: string;
+                  role: string;
+                  joinedAt: string;
+                  user: { id: string; name: string | null; email: string };
+                }) => (
+                  <TableRow
+                    key={m.id}
+                    className="border-b border-border/70 last:border-b-0 hover:bg-muted/30 transition-colors"
+                  >
+                    <TableCell className="py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-medium text-xs">
+                          {initials(m.user.name, m.user.email)}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-foreground truncate">
+                            {m.user.name || m.user.email}
+                          </div>
+                          {m.user.name && (
+                            <div className="text-xs text-muted-foreground truncate">
+                              {m.user.email}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              )
-            )}
-          </TableBody>
-        </Table>
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                          roleStyles[m.role] ?? roleStyles.VIEWER
+                        }`}
+                      >
+                        {m.role}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {new Date(m.joinedAt).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      {m.role !== "OWNER" && (
+                        <div className="flex items-center gap-0.5 justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEditDialog(m)}
+                            title="Edit member"
+                            className="h-8 w-8 p-0"
+                          >
+                            <Pencil className="h-4 w-4 text-muted-foreground" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeMember.mutate(m.user.id)}
+                            title="Remove member"
+                            className="h-8 w-8 p-0 hover:bg-destructive/10"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              )}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
       {/* Edit member dialog */}
@@ -542,7 +713,7 @@ export default function MembersPage() {
                 <p className="text-xs text-muted-foreground">
                   Select which workspaces this member can access
                 </p>
-                <div className="border rounded-md max-h-48 overflow-y-auto">
+                <div className="rounded-md border border-border/70 bg-muted/20 max-h-48 overflow-y-auto divide-y divide-border/70">
                   {workspaces.length === 0 ? (
                     <div className="px-3 py-2 text-xs text-muted-foreground">
                       No workspaces found
@@ -551,15 +722,15 @@ export default function MembersPage() {
                     workspaces.map((ws: Workspace) => (
                       <label
                         key={ws.id}
-                        className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50 cursor-pointer border-b last:border-b-0"
+                        className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-muted/50 cursor-pointer transition-colors"
                       >
                         <Checkbox
                           checked={editWorkspaceIds.includes(ws.id)}
                           onCheckedChange={() => toggleEditWorkspace(ws.id)}
                         />
-                        <span className="text-sm">{ws.name}</span>
+                        <span className="text-sm text-foreground">{ws.name}</span>
                         {ws.id === workspaceId && (
-                          <span className="text-[10px] text-muted-foreground ml-auto">
+                          <span className="ml-auto inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary ring-1 ring-inset ring-primary/20">
                             current
                           </span>
                         )}
