@@ -32,13 +32,20 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Plus, Loader2, Trash2 } from "lucide-react";
+import { Plus, Loader2, Trash2, UserPlus, X, AlertCircle } from "lucide-react";
 
 function headers(wId: string) {
   return { "x-workspace-id": wId, "Content-Type": "application/json" };
 }
 
 type Workspace = { id: string; name: string; slug: string };
+type UnassignedUser = {
+  id: string;
+  email: string;
+  name: string | null;
+  createdAt: string;
+  memberships: { workspace: { name: string } }[];
+};
 
 export default function MembersPage() {
   const workspaceId = useCurrentWorkspaceId();
@@ -47,6 +54,7 @@ export default function MembersPage() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("MEMBER");
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<string[]>([]);
+  const [dismissedUserIds, setDismissedUserIds] = useState<Set<string>>(new Set());
 
   const { data: allWorkspaces } = useWorkspaces();
 
@@ -58,7 +66,6 @@ export default function MembersPage() {
       );
     }
     if (!open) {
-      // Reset on close
       setSelectedWorkspaceIds(workspaceId ? [workspaceId] : []);
     }
   }, [open, workspaceId]);
@@ -75,13 +82,28 @@ export default function MembersPage() {
     enabled: !!workspaceId,
   });
 
+  const { data: unassignedUsers } = useQuery({
+    queryKey: ["unassigned-users", workspaceId],
+    queryFn: async () => {
+      const res = await fetch("/api/users/unassigned", {
+        headers: headers(workspaceId!),
+        cache: "no-store",
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!workspaceId,
+    refetchInterval: 60000, // Check every minute
+  });
+
   const addMember = useMutation({
     mutationFn: async () => {
+      const targetEmail = email;
       const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
         method: "POST",
         headers: headers(workspaceId!),
         body: JSON.stringify({
-          email,
+          email: targetEmail,
           role,
           workspaceIds: selectedWorkspaceIds,
         }),
@@ -94,10 +116,37 @@ export default function MembersPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["members"] });
+      queryClient.invalidateQueries({ queryKey: ["unassigned-users"] });
       setOpen(false);
       setEmail("");
       setRole("MEMBER");
       toast.success("Member added");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  // Quick-add: add an unassigned user to current workspace as MEMBER
+  const quickAdd = useMutation({
+    mutationFn: async (userEmail: string) => {
+      const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
+        method: "POST",
+        headers: headers(workspaceId!),
+        body: JSON.stringify({
+          email: userEmail,
+          role: "MEMBER",
+          workspaceIds: [workspaceId],
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["members"] });
+      queryClient.invalidateQueries({ queryKey: ["unassigned-users"] });
+      toast.success("Member added to workspace");
     },
     onError: (err) => toast.error(err.message),
   });
@@ -113,6 +162,7 @@ export default function MembersPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["members"] });
+      queryClient.invalidateQueries({ queryKey: ["unassigned-users"] });
       toast.success("Member removed");
     },
   });
@@ -132,8 +182,82 @@ export default function MembersPage() {
 
   const workspaces = (allWorkspaces?.workspaces || allWorkspaces || []) as Workspace[];
 
+  // Filter out dismissed users
+  const visibleUnassigned = ((unassignedUsers as UnassignedUser[]) || []).filter(
+    (u) => !dismissedUserIds.has(u.id)
+  );
+
   return (
     <div className="max-w-3xl">
+      {/* Unassigned users notification */}
+      {visibleUnassigned.length > 0 && (
+        <div className="mb-6 border border-amber-500/30 bg-amber-500/5 rounded-lg p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertCircle className="h-4 w-4 text-amber-500" />
+            <h3 className="text-sm font-medium">
+              New Registrations ({visibleUnassigned.length})
+            </h3>
+            <span className="text-xs text-muted-foreground">
+              These users registered but are not in this workspace yet
+            </span>
+          </div>
+          <div className="space-y-2">
+            {visibleUnassigned.map((user) => (
+              <div
+                key={user.id}
+                className="flex items-center justify-between bg-background rounded-md border px-3 py-2"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium truncate">
+                      {user.name || user.email}
+                    </span>
+                    {user.name && (
+                      <span className="text-xs text-muted-foreground truncate">
+                        {user.email}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-[10px] text-muted-foreground">
+                      Registered {new Date(user.createdAt).toLocaleDateString()}
+                    </span>
+                    {user.memberships.length > 0 && (
+                      <span className="text-[10px] text-muted-foreground">
+                        In: {user.memberships.map((m) => m.workspace.name).join(", ")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 ml-3 shrink-0">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => quickAdd.mutate(user.email)}
+                    disabled={quickAdd.isPending}
+                  >
+                    <UserPlus className="h-3 w-3" />
+                    Add
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 w-7 p-0"
+                    onClick={() =>
+                      setDismissedUserIds((prev) => new Set([...prev, user.id]))
+                    }
+                    title="Dismiss"
+                  >
+                    <X className="h-3 w-3 text-muted-foreground" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold">Team Members</h1>
