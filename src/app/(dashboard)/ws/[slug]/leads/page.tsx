@@ -58,22 +58,7 @@ const COLUMNS = [
 
 const TOTAL_W = COLUMNS.reduce((s, c) => s + c.w, 0);
 
-// Actionable lead statuses that indicate the lead interacted
-const LEAD_STATUS_OPTIONS = [
-  "Interested",
-  "Not Interested",
-  "Meeting Scheduled",
-  "Meeting Booked",
-  "Maybe Future Opportunity",
-  "Internal Forward",
-  "No Show",
-  "Qualifying",
-  "Customer",
-  "Out of Office",
-  "Wrong Person",
-  "Auto Reply",
-  "Neutral",
-] as const;
+type WorkspaceLabel = { id: string; name: string; color: string };
 
 function formatDate(date: string | null) {
   if (!date) return "-";
@@ -234,13 +219,15 @@ function EditableCell({
   );
 }
 
-// Editable status dropdown for lead status
+// Editable status dropdown for lead status — uses workspace labels dynamically
 function StatusCell({
   prospectId,
   value,
+  labels,
 }: {
   prospectId: string;
   value: string;
+  labels: WorkspaceLabel[];
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -282,10 +269,10 @@ function StatusCell({
         onClick={(e) => e.stopPropagation()}
       >
         {display ? (
-          <span className={cn(
-            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-white truncate max-w-full",
-            getStatusColor(display)
-          )}>
+          <span
+            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-white truncate max-w-full"
+            style={{ backgroundColor: labels.find((l) => l.name.toLowerCase() === display.toLowerCase())?.color || getStatusColor(display) }}
+          >
             {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
             {display}
           </span>
@@ -297,15 +284,15 @@ function StatusCell({
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-48" onClick={(e) => e.stopPropagation()}>
-        {LEAD_STATUS_OPTIONS.map((s) => (
+        {labels.map((l) => (
           <DropdownMenuItem
-            key={s}
-            onClick={(e) => { e.stopPropagation(); save(s); }}
+            key={l.id}
+            onClick={(e) => { e.stopPropagation(); save(l.name); }}
             className="text-xs"
           >
-            <span className={cn("w-2 h-2 rounded-full mr-2 shrink-0", getStatusColor(s))} />
-            {s}
-            {s.toLowerCase() === display.toLowerCase() && <Check className="h-3 w-3 ml-auto" />}
+            <span className="w-2 h-2 rounded-full mr-2 shrink-0" style={{ backgroundColor: l.color }} />
+            {l.name}
+            {l.name.toLowerCase() === display.toLowerCase() && <Check className="h-3 w-3 ml-auto" />}
           </DropdownMenuItem>
         ))}
         {display && (
@@ -510,10 +497,10 @@ export default function LeadsPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent>
               <DropdownMenuItem onClick={() => setStatusFilter("")}>All statuses</DropdownMenuItem>
-              {LEAD_STATUS_OPTIONS.map((s) => (
-                <DropdownMenuItem key={s} onClick={() => setStatusFilter(s)}>
-                  <span className={cn("w-2.5 h-2.5 rounded-full mr-2", getStatusColor(s))} />
-                  {s}
+              {(labels || []).map((l: WorkspaceLabel) => (
+                <DropdownMenuItem key={l.id} onClick={() => setStatusFilter(l.name)}>
+                  <span className="w-2.5 h-2.5 rounded-full mr-2" style={{ backgroundColor: l.color }} />
+                  {l.name}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -729,6 +716,7 @@ export default function LeadsPage() {
                     <StatusCell
                       prospectId={p.id as string}
                       value={(p.leadStatus as string) || (threadLabels[0]?.label?.name || "")}
+                      labels={labels || []}
                     />
                   </div>
 
