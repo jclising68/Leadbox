@@ -25,7 +25,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error, workspaceId } = await requireWorkspaceAccess(req, "ADMIN");
+  const { error, workspaceId, user: caller } = await requireWorkspaceAccess(req, "ADMIN");
   if (error) return error;
 
   const { email, role, workspaceIds } = await req.json();
@@ -51,10 +51,7 @@ export async function POST(
   // Verify the calling user has ADMIN+ access to all target workspaces
   const callerMemberships = await prisma.workspaceMember.findMany({
     where: {
-      userId: (await prisma.workspaceMember.findFirst({
-        where: { workspaceId: workspaceId! },
-        select: { userId: true },
-      }))?.userId,
+      userId: caller.id!,
       workspaceId: { in: targetIds },
       role: { in: ["OWNER", "ADMIN"] },
     },
