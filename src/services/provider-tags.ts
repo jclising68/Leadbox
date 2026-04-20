@@ -207,7 +207,7 @@ async function pushInstantlyTags(apiKey: string, email: string, desired: string[
         tag_ids: toAdd,
         resource_ids: [lead.id],
         resource_type: 1, // 1 = lead
-        action: "add",
+        assign: true,
       }),
     });
   }
@@ -218,7 +218,7 @@ async function pushInstantlyTags(apiKey: string, email: string, desired: string[
         tag_ids: toRemove,
         resource_ids: [lead.id],
         resource_type: 1,
-        action: "remove",
+        assign: false,
       }),
     });
   }
