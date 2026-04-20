@@ -122,9 +122,11 @@ export default function MembersPage() {
       }
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["members"] });
-      queryClient.invalidateQueries({ queryKey: ["unassigned-users"] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["members"] }),
+        queryClient.invalidateQueries({ queryKey: ["unassigned-users"] }),
+      ]);
       setOpen(false);
       setEmail("");
       setRole("MEMBER");
@@ -151,9 +153,11 @@ export default function MembersPage() {
       }
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["members"] });
-      queryClient.invalidateQueries({ queryKey: ["unassigned-users"] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["members"] }),
+        queryClient.invalidateQueries({ queryKey: ["unassigned-users"] }),
+      ]);
       toast.success("Member added to workspace");
     },
     onError: (err) => toast.error(err.message),
@@ -168,9 +172,11 @@ export default function MembersPage() {
       });
       if (!res.ok) throw new Error("Failed to remove member");
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["members"] });
-      queryClient.invalidateQueries({ queryKey: ["unassigned-users"] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["members"] }),
+        queryClient.invalidateQueries({ queryKey: ["unassigned-users"] }),
+      ]);
       toast.success("Member removed");
     },
   });
@@ -213,8 +219,13 @@ export default function MembersPage() {
       }
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["members"] });
+    onSuccess: async () => {
+      // Wait for all caches to refetch before closing dialog
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["members"] }),
+        queryClient.invalidateQueries({ queryKey: ["unassigned-users"] }),
+        queryClient.invalidateQueries({ queryKey: ["user-memberships"] }),
+      ]);
       setEditingMember(null);
       toast.success("Member updated");
     },
