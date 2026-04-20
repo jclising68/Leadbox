@@ -261,6 +261,12 @@ function StatusCell({
   }, [value, workspaceId, prospectId, queryClient]);
 
   const display = value || "";
+  // Only show as a colored badge if the status matches a workspace label.
+  // Campaign statuses like "In Progress" or "Replied" that aren't workspace
+  // labels show the "Set tag" placeholder instead.
+  const matchedLabel = display
+    ? labels.find((l) => l.name.toLowerCase() === display.toLowerCase())
+    : null;
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -268,13 +274,13 @@ function StatusCell({
         className="inline-flex items-center gap-1 max-w-full cursor-pointer group/status"
         onClick={(e) => e.stopPropagation()}
       >
-        {display ? (
+        {matchedLabel ? (
           <span
             className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-white truncate max-w-full"
-            style={{ backgroundColor: labels.find((l) => l.name.toLowerCase() === display.toLowerCase())?.color || getStatusColor(display) }}
+            style={{ backgroundColor: matchedLabel.color }}
           >
             {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-            {display}
+            {matchedLabel.name}
           </span>
         ) : (
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-dashed border-muted-foreground/30 text-[10px] text-muted-foreground hover:border-muted-foreground/60 hover:text-foreground transition-colors">
@@ -295,14 +301,14 @@ function StatusCell({
             {l.name.toLowerCase() === display.toLowerCase() && <Check className="h-3 w-3 ml-auto" />}
           </DropdownMenuItem>
         ))}
-        {display && (
+        {matchedLabel && (
           <>
             <div className="border-t my-1" />
             <DropdownMenuItem
               onClick={(e) => { e.stopPropagation(); save(""); }}
               className="text-xs text-muted-foreground"
             >
-              <X className="h-3 w-3 mr-2" /> Clear status
+              <X className="h-3 w-3 mr-2" /> Clear tag
             </DropdownMenuItem>
           </>
         )}
