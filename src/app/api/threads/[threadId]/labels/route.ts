@@ -18,9 +18,10 @@ export async function POST(
   const { threadId } = await params;
   const { labelId } = await req.json();
 
-  // Verify thread belongs to workspace
+  // Verify thread belongs to workspace (include prospectId for status sync)
   const thread = await prisma.thread.findFirst({
     where: { id: threadId, workspaceId: workspaceId! },
+    select: { id: true, prospectId: true },
   });
   if (!thread) {
     return NextResponse.json({ error: "Thread not found" }, { status: 404 });
@@ -41,6 +42,15 @@ export async function POST(
     include: { label: true },
   });
 
+  // Sync the most recently applied label as the prospect's leadStatus so
+  // the leads page reflects the change immediately.
+  if (thread.prospectId) {
+    await prisma.prospect.update({
+      where: { id: thread.prospectId },
+      data: { leadStatus: label.name },
+    });
+  }
+
   const providerSync = await syncProviderTags(workspaceId!, threadId);
 
   return NextResponse.json({ ...threadLabel, providerSync });
@@ -58,6 +68,7 @@ export async function DELETE(
 
   const thread = await prisma.thread.findFirst({
     where: { id: threadId, workspaceId: workspaceId! },
+    select: { id: true, prospectId: true },
   });
   if (!thread) {
     return NextResponse.json({ error: "Thread not found" }, { status: 404 });
@@ -66,6 +77,20 @@ export async function DELETE(
   await prisma.threadLabel.deleteMany({
     where: { threadId, labelId },
   });
+
+  // After removing a label, set leadStatus to the next remaining label (if
+  // any), or clear it. This keeps the leads page in sync with inbox labels.
+  if (thread.prospectId) {
+    const remaining = await prisma.threadLabel.findFirst({
+      where: { threadId },
+      orderBy: { appliedAt: "desc" },
+      include: { label: { select: { name: true } } },
+    });
+    await prisma.prospect.update({
+      where: { id: thread.prospectId },
+      data: { leadStatus: remaining?.label.name ?? null },
+    });
+  }
 
   const providerSync = await syncProviderTags(workspaceId!, threadId);
 

@@ -137,6 +137,7 @@ export function useAddLabel() {
       queryClient.invalidateQueries({ queryKey: ["threads"] });
       queryClient.invalidateQueries({ queryKey: ["thread"] });
       queryClient.invalidateQueries({ queryKey: ["labels"] });
+      queryClient.invalidateQueries({ queryKey: ["prospects"] });
       reportProviderSync(data.providerSync);
     },
   });
@@ -160,6 +161,7 @@ export function useRemoveLabel() {
       queryClient.invalidateQueries({ queryKey: ["threads"] });
       queryClient.invalidateQueries({ queryKey: ["thread"] });
       queryClient.invalidateQueries({ queryKey: ["labels"] });
+      queryClient.invalidateQueries({ queryKey: ["prospects"] });
       reportProviderSync(data.providerSync);
     },
   });
