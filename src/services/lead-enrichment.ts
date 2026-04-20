@@ -172,14 +172,6 @@ type CachedProspect = {
   } | null;
 };
 
-// Non-actionable campaign statuses that indicate "just in a sequence" — these
-// leads haven't engaged in any meaningful way. Used to decide whether to
-// import a lead that only has a campaign status (no reply, no tag).
-const NON_ACTIONABLE_STATUSES = new Set([
-  "Not Started", "In Progress", "Paused", "Completed", "Lead",
-  "Bounced", "Unsubscribed",
-]);
-
 /**
  * Build the enrichment update data for a single Instantly lead.
  * Shared between the import (new) and update (existing) paths.
@@ -433,13 +425,13 @@ export async function enrichFromInstantly(
           enriched++;
         } else {
           // ---- IMPORT new lead ----
-          // Only import leads that are actionable: replied, tagged, or have
-          // a meaningful interest status. Skip leads just sitting in a
-          // campaign with no engagement — they'd clutter the leads page.
+          // Strict gate: only import leads that have actually replied OR have
+          // been tagged in Instantly. Everything else (in-sequence, finished,
+          // bounced, etc.) is noise until they engage.
           const hasReply = (lead.email_reply_count ?? 0) > 0;
-          const hasTag = interestLabel || customTagLabels.length > 0;
-          if (!hasReply && !hasTag && NON_ACTIONABLE_STATUSES.has(statusLabel)) {
-            continue; // Not interesting yet — skip import
+          const hasTag = !!interestLabel || customTagLabels.length > 0;
+          if (!hasReply && !hasTag) {
+            continue; // No reply and no tag — skip import
           }
 
           try {

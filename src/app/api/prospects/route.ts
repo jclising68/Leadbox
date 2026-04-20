@@ -106,34 +106,22 @@ export async function GET(req: NextRequest) {
     };
   }
 
-  // Show "actionable" leads: those that have replied OR have a meaningful
-  // status/tag. This ensures tagged leads from Instantly (e.g. "Not Interested")
-  // appear even if their reply email hasn't been synced yet.
+  // Show only "actionable" leads: those that replied OR have tags from
+  // Instantly/HeyReach. Uses precise data signals — no hardcoded status lists.
+  //   1. Has INBOUND messages = lead replied
+  //   2. Has WEBHOOK-source labels = tagged in Instantly/HeyReach
+  //   3. stepReplied is set = enrichment confirmed reply from Instantly API
   if (actionable === "true") {
     where.AND = [
       ...(Array.isArray(where.AND) ? where.AND : []),
       {
         OR: [
-          // Lead has at least one inbound message (replied)
+          // Lead replied (inbound message exists in thread)
           { thread: { messages: { some: { direction: "INBOUND" } } } },
-          // Lead has a meaningful status (not a generic campaign status)
-          {
-            leadStatus: {
-              notIn: [
-                "Not Started", "not started",
-                "In Progress", "in progress",
-                "In Sequence", "in sequence",
-                "Paused", "paused",
-                "Completed", "completed",
-                "Not Yet Contacted", "not yet contacted",
-                "Lead", "lead",
-                "Bounced", "bounced",
-                "Unsubscribed", "unsubscribed",
-              ],
-            },
-          },
-          // Lead has thread labels applied (tags from Instantly)
-          { thread: { threadLabels: { some: {} } } },
+          // Lead has been tagged in Instantly or HeyReach (WEBHOOK-source labels)
+          { thread: { threadLabels: { some: { source: "WEBHOOK" } } } },
+          // Enrichment confirmed reply via Instantly's email_reply_count
+          { stepReplied: { not: null } },
         ],
       },
     ];
