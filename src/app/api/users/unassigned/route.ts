@@ -4,26 +4,17 @@ import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { workspaceJson } from "@/lib/api-response";
 
 /**
- * Returns all registered users who are NOT a member of the current workspace.
- * Visible to ADMIN+ only — used on the Members settings page so admins can
- * see new registrations and assign them to workspaces.
+ * Returns registered users who have not yet been assigned to ANY workspace.
+ * Once an admin places them into one workspace, they stop appearing here on
+ * every other workspace's members page — the admin has made the assignment
+ * decision, so no further nagging.
  */
 export async function GET(req: NextRequest) {
-  const { error, workspaceId } = await requireWorkspaceAccess(req, "ADMIN");
+  const { error } = await requireWorkspaceAccess(req, "ADMIN");
   if (error) return error;
 
-  // Get all user IDs that are already members of this workspace
-  const existingMembers = await prisma.workspaceMember.findMany({
-    where: { workspaceId: workspaceId! },
-    select: { userId: true },
-  });
-  const memberUserIds = existingMembers.map((m) => m.userId);
-
-  // Find all users NOT in this workspace, ordered by most recent first
   const unassigned = await prisma.user.findMany({
-    where: {
-      id: { notIn: memberUserIds },
-    },
+    where: { memberships: { none: {} } },
     select: {
       id: true,
       email: true,
