@@ -28,7 +28,7 @@ export async function POST(
   const { error, workspaceId } = await requireWorkspaceAccess(req, "ADMIN");
   if (error) return error;
 
-  const { email, role } = await req.json();
+  const { email, role, workspaceIds } = await req.json();
 
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
@@ -38,35 +38,72 @@ export async function POST(
     );
   }
 
-  const existing = await prisma.workspaceMember.findUnique({
-    where: {
-      userId_workspaceId: { userId: user.id, workspaceId: workspaceId! },
-    },
-  });
-
-  if (existing) {
-    return NextResponse.json(
-      { error: "User is already a member" },
-      { status: 400 }
-    );
-  }
-
   // Validate role — ADMIN cannot assign OWNER
   const allowedRoles = ["ADMIN", "MEMBER", "VIEWER"];
   const assignRole = role && allowedRoles.includes(role) ? role : "MEMBER";
 
-  const member = await prisma.workspaceMember.create({
-    data: {
-      userId: user.id,
-      workspaceId: workspaceId!,
-      role: assignRole,
-    },
-    include: {
-      user: { select: { id: true, email: true, name: true } },
-    },
-  });
+  // Determine target workspaces: use provided list, or fall back to current
+  const targetIds: string[] =
+    Array.isArray(workspaceIds) && workspaceIds.length > 0
+      ? workspaceIds
+      : [workspaceId!];
 
-  return NextResponse.json(member, { status: 201 });
+  // Verify the calling user has ADMIN+ access to all target workspaces
+  const callerMemberships = await prisma.workspaceMember.findMany({
+    where: {
+      userId: (await prisma.workspaceMember.findFirst({
+        where: { workspaceId: workspaceId! },
+        select: { userId: true },
+      }))?.userId,
+      workspaceId: { in: targetIds },
+      role: { in: ["OWNER", "ADMIN"] },
+    },
+    select: { workspaceId: true },
+  });
+  const authorizedIds = new Set(callerMemberships.map((m) => m.workspaceId));
+
+  // Create memberships for all authorized target workspaces (skip duplicates)
+  let added = 0;
+  let skipped = 0;
+  const results: string[] = [];
+
+  for (const wsId of targetIds) {
+    if (!authorizedIds.has(wsId)) {
+      skipped++;
+      continue;
+    }
+
+    const existing = await prisma.workspaceMember.findUnique({
+      where: { userId_workspaceId: { userId: user.id, workspaceId: wsId } },
+    });
+    if (existing) {
+      skipped++;
+      continue;
+    }
+
+    await prisma.workspaceMember.create({
+      data: { userId: user.id, workspaceId: wsId, role: assignRole },
+    });
+    added++;
+
+    const ws = await prisma.workspace.findUnique({
+      where: { id: wsId },
+      select: { name: true },
+    });
+    results.push(ws?.name || wsId);
+  }
+
+  if (added === 0 && skipped > 0) {
+    return NextResponse.json(
+      { error: "User is already a member of the selected workspace(s)" },
+      { status: 400 }
+    );
+  }
+
+  return NextResponse.json(
+    { added, skipped, workspaces: results },
+    { status: 201 }
+  );
 }
 
 export async function DELETE(

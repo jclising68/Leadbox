@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
+import { useWorkspaces } from "@/hooks/use-workspace";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -36,12 +38,30 @@ function headers(wId: string) {
   return { "x-workspace-id": wId, "Content-Type": "application/json" };
 }
 
+type Workspace = { id: string; name: string; slug: string };
+
 export default function MembersPage() {
   const workspaceId = useCurrentWorkspaceId();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("MEMBER");
+  const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<string[]>([]);
+
+  const { data: allWorkspaces } = useWorkspaces();
+
+  // Pre-check current workspace when dialog opens
+  useEffect(() => {
+    if (open && workspaceId) {
+      setSelectedWorkspaceIds((prev) =>
+        prev.length === 0 ? [workspaceId] : prev
+      );
+    }
+    if (!open) {
+      // Reset on close
+      setSelectedWorkspaceIds(workspaceId ? [workspaceId] : []);
+    }
+  }, [open, workspaceId]);
 
   const { data: members, isLoading } = useQuery({
     queryKey: ["members", workspaceId],
@@ -60,7 +80,11 @@ export default function MembersPage() {
       const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
         method: "POST",
         headers: headers(workspaceId!),
-        body: JSON.stringify({ email, role }),
+        body: JSON.stringify({
+          email,
+          role,
+          workspaceIds: selectedWorkspaceIds,
+        }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -72,6 +96,7 @@ export default function MembersPage() {
       queryClient.invalidateQueries({ queryKey: ["members"] });
       setOpen(false);
       setEmail("");
+      setRole("MEMBER");
       toast.success("Member added");
     },
     onError: (err) => toast.error(err.message),
@@ -92,12 +117,20 @@ export default function MembersPage() {
     },
   });
 
+  function toggleWorkspace(id: string) {
+    setSelectedWorkspaceIds((prev) =>
+      prev.includes(id) ? prev.filter((w) => w !== id) : [...prev, id]
+    );
+  }
+
   const roleColor: Record<string, string> = {
     OWNER: "text-yellow-500",
     ADMIN: "text-blue-500",
     MEMBER: "text-green-500",
     VIEWER: "text-gray-500",
   };
+
+  const workspaces = (allWorkspaces?.workspaces || allWorkspaces || []) as Workspace[];
 
   return (
     <div className="max-w-3xl">
@@ -140,11 +173,48 @@ export default function MembersPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <Label>Workspace Access</Label>
+                <p className="text-xs text-muted-foreground">
+                  Select which workspaces this member can access
+                </p>
+                <div className="border rounded-md max-h-48 overflow-y-auto">
+                  {workspaces.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">
+                      No workspaces found
+                    </div>
+                  ) : (
+                    workspaces.map((ws: Workspace) => (
+                      <label
+                        key={ws.id}
+                        className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50 cursor-pointer border-b last:border-b-0"
+                      >
+                        <Checkbox
+                          checked={selectedWorkspaceIds.includes(ws.id)}
+                          onCheckedChange={() => toggleWorkspace(ws.id)}
+                        />
+                        <span className="text-sm">{ws.name}</span>
+                        {ws.id === workspaceId && (
+                          <span className="text-[10px] text-muted-foreground ml-auto">
+                            current
+                          </span>
+                        )}
+                      </label>
+                    ))
+                  )}
+                </div>
+                {selectedWorkspaceIds.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {selectedWorkspaceIds.length} workspace{selectedWorkspaceIds.length > 1 ? "s" : ""} selected
+                  </p>
+                )}
+              </div>
               <Button
                 className="w-full"
                 onClick={() => addMember.mutate()}
-                disabled={!email || addMember.isPending}
+                disabled={!email || selectedWorkspaceIds.length === 0 || addMember.isPending}
               >
+                {addMember.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Add Member
               </Button>
             </div>
