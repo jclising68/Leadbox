@@ -126,6 +126,7 @@ export default function MembersPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["members"] }),
         queryClient.invalidateQueries({ queryKey: ["unassigned-users"] }),
+        queryClient.invalidateQueries({ queryKey: ["user-memberships"] }),
       ]);
       setOpen(false);
       setEmail("");
@@ -157,6 +158,7 @@ export default function MembersPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["members"] }),
         queryClient.invalidateQueries({ queryKey: ["unassigned-users"] }),
+        queryClient.invalidateQueries({ queryKey: ["user-memberships"] }),
       ]);
       toast.success("Member added to workspace");
     },
@@ -176,14 +178,16 @@ export default function MembersPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["members"] }),
         queryClient.invalidateQueries({ queryKey: ["unassigned-users"] }),
+        queryClient.invalidateQueries({ queryKey: ["user-memberships"] }),
       ]);
       toast.success("Member removed");
     },
   });
 
-  // Fetch memberships for the user being edited
-  const { data: editMemberships } = useQuery({
+  // Fetch memberships for the user being edited — must be fresh (no stale cache)
+  const { data: editMemberships, isLoading: editMembershipsLoading } = useQuery({
     queryKey: ["user-memberships", editingMember?.userId],
+    staleTime: 0, // always refetch when dialog opens
     queryFn: async () => {
       const res = await fetch(`/api/users/${editingMember!.userId}/memberships`, {
         headers: headers(workspaceId!),
@@ -571,12 +575,12 @@ export default function MembersPage() {
               <Button
                 className="w-full"
                 onClick={() => updateMember.mutate()}
-                disabled={editWorkspaceIds.length === 0 || updateMember.isPending}
+                disabled={editMembershipsLoading || editWorkspaceIds.length === 0 || updateMember.isPending}
               >
-                {updateMember.isPending && (
+                {(updateMember.isPending || editMembershipsLoading) && (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 )}
-                Save Changes
+                {editMembershipsLoading ? "Loading..." : "Save Changes"}
               </Button>
             </div>
           )}

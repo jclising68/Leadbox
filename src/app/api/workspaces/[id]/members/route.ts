@@ -164,13 +164,17 @@ export async function PATCH(
     }
 
     // Remove memberships for deselected workspaces (only ones caller has access to)
+    // NEVER remove the current workspace membership — use the remove button for that
     const desiredSet = new Set(workspaceIds);
     for (const membership of currentMemberships) {
       if (
-        !desiredSet.has(membership.workspaceId) &&
-        callerAuthorized.has(membership.workspaceId) &&
-        membership.role !== "OWNER" // never remove OWNER
+        membership.workspaceId === workspaceId // protect current workspace
+        || !callerAuthorized.has(membership.workspaceId)
+        || membership.role === "OWNER"
       ) {
+        continue;
+      }
+      if (!desiredSet.has(membership.workspaceId)) {
         await prisma.workspaceMember.delete({ where: { id: membership.id } });
       }
     }
