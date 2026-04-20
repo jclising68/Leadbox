@@ -25,10 +25,17 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error, workspaceId, user: caller } = await requireWorkspaceAccess(req, "ADMIN");
+  const { error, user: caller } = await requireWorkspaceAccess(req, "ADMIN");
   if (error) return error;
 
   const { email, role, workspaceIds } = await req.json();
+
+  if (!Array.isArray(workspaceIds) || workspaceIds.length === 0) {
+    return NextResponse.json(
+      { error: "Select at least one workspace" },
+      { status: 400 }
+    );
+  }
 
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
@@ -38,67 +45,46 @@ export async function POST(
     );
   }
 
-  // Validate role — ADMIN cannot assign OWNER
   const allowedRoles = ["ADMIN", "MEMBER", "VIEWER"];
   const assignRole = role && allowedRoles.includes(role) ? role : "MEMBER";
 
-  // Determine target workspaces: use provided list, or fall back to current
-  const targetIds: string[] =
-    Array.isArray(workspaceIds) && workspaceIds.length > 0
-      ? workspaceIds
-      : [workspaceId!];
+  const [callerAdmin, existingMemberships] = await Promise.all([
+    prisma.workspaceMember.findMany({
+      where: {
+        userId: caller.id!,
+        workspaceId: { in: workspaceIds },
+        role: { in: ["OWNER", "ADMIN"] },
+      },
+      select: { workspaceId: true },
+    }),
+    prisma.workspaceMember.findMany({
+      where: { userId: user.id, workspaceId: { in: workspaceIds } },
+      select: { workspaceId: true },
+    }),
+  ]);
+  const authorizedIds = new Set(callerAdmin.map((m) => m.workspaceId));
+  const alreadyMember = new Set(existingMemberships.map((m) => m.workspaceId));
 
-  // Verify the calling user has ADMIN+ access to all target workspaces
-  const callerMemberships = await prisma.workspaceMember.findMany({
-    where: {
-      userId: caller.id!,
-      workspaceId: { in: targetIds },
-      role: { in: ["OWNER", "ADMIN"] },
-    },
-    select: { workspaceId: true },
-  });
-  const authorizedIds = new Set(callerMemberships.map((m) => m.workspaceId));
+  const toCreate = workspaceIds.filter(
+    (id: string) => authorizedIds.has(id) && !alreadyMember.has(id)
+  );
 
-  // Create memberships for all authorized target workspaces (skip duplicates)
-  let added = 0;
-  let skipped = 0;
-  const results: string[] = [];
-
-  for (const wsId of targetIds) {
-    if (!authorizedIds.has(wsId)) {
-      skipped++;
-      continue;
-    }
-
-    const existing = await prisma.workspaceMember.findUnique({
-      where: { userId_workspaceId: { userId: user.id, workspaceId: wsId } },
+  if (toCreate.length > 0) {
+    await prisma.workspaceMember.createMany({
+      data: toCreate.map((workspaceId: string) => ({
+        userId: user.id,
+        workspaceId,
+        role: assignRole,
+      })),
     });
-    if (existing) {
-      skipped++;
-      continue;
-    }
-
-    await prisma.workspaceMember.create({
-      data: { userId: user.id, workspaceId: wsId, role: assignRole },
-    });
-    added++;
-
-    const ws = await prisma.workspace.findUnique({
-      where: { id: wsId },
-      select: { name: true },
-    });
-    results.push(ws?.name || wsId);
-  }
-
-  if (added === 0 && skipped > 0) {
-    return NextResponse.json(
-      { error: "User is already a member of the selected workspace(s)" },
-      { status: 400 }
-    );
   }
 
   return NextResponse.json(
-    { added, skipped, workspaces: results },
+    {
+      added: toCreate.length,
+      alreadyMember: workspaceIds.filter((id: string) => alreadyMember.has(id)).length,
+      unauthorized: workspaceIds.filter((id: string) => !authorizedIds.has(id)).length,
+    },
     { status: 201 }
   );
 }
@@ -107,88 +93,75 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error, workspaceId, user } = await requireWorkspaceAccess(req, "ADMIN");
+  const { error, user: caller } = await requireWorkspaceAccess(req, "ADMIN");
   if (error) return error;
 
   const { userId, role, workspaceIds } = await req.json();
 
-  // Find the target member in the current workspace
-  const target = await prisma.workspaceMember.findUnique({
-    where: { userId_workspaceId: { userId, workspaceId: workspaceId! } },
-  });
-  if (!target) {
-    return NextResponse.json({ error: "Member not found" }, { status: 404 });
-  }
-  if (target.role === "OWNER") {
+  if (!Array.isArray(workspaceIds) || workspaceIds.length === 0) {
     return NextResponse.json(
-      { error: "Cannot edit workspace owner" },
-      { status: 403 }
+      { error: "Select at least one workspace" },
+      { status: 400 }
     );
   }
 
   const allowedRoles = ["ADMIN", "MEMBER", "VIEWER"];
-  const newRole = role && allowedRoles.includes(role) ? role : target.role;
+  const newRole = role && allowedRoles.includes(role) ? role : "MEMBER";
 
-  // Update role in current workspace
-  await prisma.workspaceMember.update({
-    where: { id: target.id },
-    data: { role: newRole },
-  });
-
-  // Reconcile workspace access if workspaceIds provided
-  if (Array.isArray(workspaceIds)) {
-    // Verify caller has ADMIN+ access to all target workspaces
-    const callerMemberships = await prisma.workspaceMember.findMany({
-      where: {
-        userId: user.id!,
-        role: { in: ["OWNER", "ADMIN"] },
-      },
+  const [callerAdmin, current] = await Promise.all([
+    prisma.workspaceMember.findMany({
+      where: { userId: caller.id!, role: { in: ["OWNER", "ADMIN"] } },
       select: { workspaceId: true },
-    });
-    const callerAuthorized = new Set(callerMemberships.map((m) => m.workspaceId));
-
-    // Get user's current memberships
-    const currentMemberships = await prisma.workspaceMember.findMany({
+    }),
+    prisma.workspaceMember.findMany({
       where: { userId },
-      select: { workspaceId: true, role: true, id: true },
-    });
-    const currentWsIds = new Set(currentMemberships.map((m) => m.workspaceId));
+      select: { id: true, workspaceId: true, role: true },
+    }),
+  ]);
+  const authorized = new Set(callerAdmin.map((m) => m.workspaceId));
+  const desired = new Set(workspaceIds);
 
-    // Add new workspace memberships
-    for (const wsId of workspaceIds) {
-      if (!currentWsIds.has(wsId) && callerAuthorized.has(wsId)) {
-        await prisma.workspaceMember.create({
-          data: { userId, workspaceId: wsId, role: newRole },
-        });
-      }
-    }
+  const toCreate: string[] = [];
+  const toUpdate: string[] = [];
+  const toDelete: string[] = [];
 
-    // Remove memberships for deselected workspaces (only ones caller has access to)
-    const desiredSet = new Set(workspaceIds);
-    for (const membership of currentMemberships) {
-      if (!callerAuthorized.has(membership.workspaceId) || membership.role === "OWNER") {
-        continue;
-      }
-      if (!desiredSet.has(membership.workspaceId)) {
-        await prisma.workspaceMember.delete({ where: { id: membership.id } });
-      }
-    }
-
-    // Update role in all selected workspaces the caller controls
-    for (const wsId of workspaceIds) {
-      if (wsId !== workspaceId && callerAuthorized.has(wsId)) {
-        const existing = await prisma.workspaceMember.findUnique({
-          where: { userId_workspaceId: { userId, workspaceId: wsId } },
-        });
-        if (existing && existing.role !== "OWNER") {
-          await prisma.workspaceMember.update({
-            where: { id: existing.id },
-            data: { role: newRole },
-          });
-        }
-      }
-    }
+  for (const wsId of workspaceIds) {
+    if (!authorized.has(wsId)) continue;
+    const existing = current.find((m) => m.workspaceId === wsId);
+    if (!existing) toCreate.push(wsId);
+    else if (existing.role !== "OWNER") toUpdate.push(existing.id);
   }
+
+  for (const m of current) {
+    if (m.role === "OWNER") continue;
+    if (!authorized.has(m.workspaceId)) continue;
+    if (!desired.has(m.workspaceId)) toDelete.push(m.id);
+  }
+
+  await prisma.$transaction([
+    ...(toCreate.length > 0
+      ? [
+          prisma.workspaceMember.createMany({
+            data: toCreate.map((workspaceId) => ({
+              userId,
+              workspaceId,
+              role: newRole,
+            })),
+          }),
+        ]
+      : []),
+    ...(toUpdate.length > 0
+      ? [
+          prisma.workspaceMember.updateMany({
+            where: { id: { in: toUpdate } },
+            data: { role: newRole },
+          }),
+        ]
+      : []),
+    ...(toDelete.length > 0
+      ? [prisma.workspaceMember.deleteMany({ where: { id: { in: toDelete } } })]
+      : []),
+  ]);
 
   return NextResponse.json({ success: true });
 }

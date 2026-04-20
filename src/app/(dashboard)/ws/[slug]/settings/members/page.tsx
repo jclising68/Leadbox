@@ -14,7 +14,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -66,17 +65,12 @@ export default function MembersPage() {
 
   const { data: allWorkspaces } = useWorkspaces();
 
-  // Pre-check current workspace when dialog opens
-  useEffect(() => {
-    if (open && workspaceId) {
-      setSelectedWorkspaceIds((prev) =>
-        prev.length === 0 ? [workspaceId] : prev
-      );
-    }
-    if (!open) {
-      setSelectedWorkspaceIds(workspaceId ? [workspaceId] : []);
-    }
-  }, [open, workspaceId]);
+  function openAddDialog(prefillEmail = "") {
+    setEmail(prefillEmail);
+    setRole("MEMBER");
+    setSelectedWorkspaceIds(workspaceId ? [workspaceId] : []);
+    setOpen(true);
+  }
 
   const { data: members, isLoading } = useQuery({
     queryKey: ["members", workspaceId],
@@ -106,12 +100,11 @@ export default function MembersPage() {
 
   const addMember = useMutation({
     mutationFn: async () => {
-      const targetEmail = email;
       const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
         method: "POST",
         headers: headers(workspaceId!),
         body: JSON.stringify({
-          email: targetEmail,
+          email,
           role,
           workspaceIds: selectedWorkspaceIds,
         }),
@@ -120,47 +113,26 @@ export default function MembersPage() {
         const data = await res.json();
         throw new Error(data.error);
       }
-      return res.json();
+      return res.json() as Promise<{
+        added: number;
+        alreadyMember: number;
+        unauthorized: number;
+      }>;
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["members"] }),
         queryClient.invalidateQueries({ queryKey: ["unassigned-users"] }),
         queryClient.invalidateQueries({ queryKey: ["user-memberships"] }),
       ]);
       setOpen(false);
-      setEmail("");
-      setRole("MEMBER");
-      toast.success("Member added");
-    },
-    onError: (err) => toast.error(err.message),
-  });
-
-  // Quick-add: add an unassigned user to current workspace as MEMBER
-  const quickAdd = useMutation({
-    mutationFn: async (userEmail: string) => {
-      const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
-        method: "POST",
-        headers: headers(workspaceId!),
-        body: JSON.stringify({
-          email: userEmail,
-          role: "MEMBER",
-          workspaceIds: [workspaceId],
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error);
+      if (result.added > 0) {
+        toast.success(
+          `Added to ${result.added} workspace${result.added > 1 ? "s" : ""}`
+        );
+      } else {
+        toast.info("User is already a member of the selected workspace(s)");
       }
-      return res.json();
-    },
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["members"] }),
-        queryClient.invalidateQueries({ queryKey: ["unassigned-users"] }),
-        queryClient.invalidateQueries({ queryKey: ["user-memberships"] }),
-      ]);
-      toast.success("Member added to workspace");
     },
     onError: (err) => toast.error(err.message),
   });
@@ -323,8 +295,7 @@ export default function MembersPage() {
                     size="sm"
                     variant="outline"
                     className="h-7 text-xs gap-1"
-                    onClick={() => quickAdd.mutate(user.email)}
-                    disabled={quickAdd.isPending}
+                    onClick={() => openAddDialog(user.email)}
                   >
                     <UserPlus className="h-3 w-3" />
                     Add
@@ -354,11 +325,15 @@ export default function MembersPage() {
             Manage who has access to this workspace
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => openAddDialog()}
+          className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          <Plus className="h-4 w-4" />
+          Add Member
+        </button>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-            <Plus className="h-4 w-4" />
-            Add Member
-          </DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Add Team Member</DialogTitle>
