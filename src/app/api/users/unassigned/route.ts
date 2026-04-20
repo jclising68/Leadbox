@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
       createdAt: true,
       memberships: {
         select: {
-          workspace: { select: { name: true } },
+          workspace: { select: { id: true, name: true } },
         },
       },
     },

@@ -43,7 +43,7 @@ type UnassignedUser = {
   email: string;
   name: string | null;
   createdAt: string;
-  memberships: { workspace: { name: string } }[];
+  memberships: { workspace: { id: string; name: string } }[];
 };
 
 export default function MembersPage() {
@@ -53,6 +53,7 @@ export default function MembersPage() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("MEMBER");
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<string[]>([]);
+  const [lockedWorkspaceIds, setLockedWorkspaceIds] = useState<string[]>([]);
   const [dismissedUserIds, setDismissedUserIds] = useState<Set<string>>(new Set());
   const [editingMember, setEditingMember] = useState<{
     userId: string;
@@ -65,9 +66,13 @@ export default function MembersPage() {
 
   const { data: allWorkspaces } = useWorkspaces();
 
-  function openAddDialog(prefillEmail = "") {
+  function openAddDialog(
+    prefillEmail = "",
+    alreadyMemberOf: string[] = []
+  ) {
     setEmail(prefillEmail);
     setRole("MEMBER");
+    setLockedWorkspaceIds(alreadyMemberOf);
     setSelectedWorkspaceIds(workspaceId ? [workspaceId] : []);
     setOpen(true);
   }
@@ -295,7 +300,12 @@ export default function MembersPage() {
                     size="sm"
                     variant="outline"
                     className="h-7 text-xs gap-1"
-                    onClick={() => openAddDialog(user.email)}
+                    onClick={() =>
+                      openAddDialog(
+                        user.email,
+                        user.memberships.map((m) => m.workspace.id)
+                      )
+                    }
                   >
                     <UserPlus className="h-3 w-3" />
                     Add
@@ -372,23 +382,40 @@ export default function MembersPage() {
                       No workspaces found
                     </div>
                   ) : (
-                    workspaces.map((ws: Workspace) => (
-                      <label
-                        key={ws.id}
-                        className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50 cursor-pointer border-b last:border-b-0"
-                      >
-                        <Checkbox
-                          checked={selectedWorkspaceIds.includes(ws.id)}
-                          onCheckedChange={() => toggleWorkspace(ws.id)}
-                        />
-                        <span className="text-sm">{ws.name}</span>
-                        {ws.id === workspaceId && (
-                          <span className="text-[10px] text-muted-foreground ml-auto">
-                            current
+                    workspaces.map((ws: Workspace) => {
+                      const locked = lockedWorkspaceIds.includes(ws.id);
+                      return (
+                        <label
+                          key={ws.id}
+                          className={`flex items-center gap-2.5 px-3 py-2 border-b last:border-b-0 ${
+                            locked
+                              ? "opacity-60 cursor-not-allowed"
+                              : "hover:bg-muted/50 cursor-pointer"
+                          }`}
+                        >
+                          <Checkbox
+                            checked={locked || selectedWorkspaceIds.includes(ws.id)}
+                            disabled={locked}
+                            onCheckedChange={() =>
+                              !locked && toggleWorkspace(ws.id)
+                            }
+                          />
+                          <span className="text-sm">{ws.name}</span>
+                          <span className="ml-auto flex items-center gap-1.5">
+                            {locked && (
+                              <span className="text-[10px] text-muted-foreground">
+                                already a member
+                              </span>
+                            )}
+                            {ws.id === workspaceId && !locked && (
+                              <span className="text-[10px] text-muted-foreground">
+                                current
+                              </span>
+                            )}
                           </span>
-                        )}
-                      </label>
-                    ))
+                        </label>
+                      );
+                    })
                   )}
                 </div>
                 {selectedWorkspaceIds.length > 0 && (
