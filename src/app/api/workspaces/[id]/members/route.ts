@@ -106,6 +106,97 @@ export async function POST(
   );
 }
 
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { error, workspaceId, user } = await requireWorkspaceAccess(req, "ADMIN");
+  if (error) return error;
+
+  const { userId, role, workspaceIds } = await req.json();
+
+  // Find the target member in the current workspace
+  const target = await prisma.workspaceMember.findUnique({
+    where: { userId_workspaceId: { userId, workspaceId: workspaceId! } },
+  });
+  if (!target) {
+    return NextResponse.json({ error: "Member not found" }, { status: 404 });
+  }
+  if (target.role === "OWNER") {
+    return NextResponse.json(
+      { error: "Cannot edit workspace owner" },
+      { status: 403 }
+    );
+  }
+
+  const allowedRoles = ["ADMIN", "MEMBER", "VIEWER"];
+  const newRole = role && allowedRoles.includes(role) ? role : target.role;
+
+  // Update role in current workspace
+  await prisma.workspaceMember.update({
+    where: { id: target.id },
+    data: { role: newRole },
+  });
+
+  // Reconcile workspace access if workspaceIds provided
+  if (Array.isArray(workspaceIds)) {
+    // Verify caller has ADMIN+ access to all target workspaces
+    const callerMemberships = await prisma.workspaceMember.findMany({
+      where: {
+        userId: user.id!,
+        role: { in: ["OWNER", "ADMIN"] },
+      },
+      select: { workspaceId: true },
+    });
+    const callerAuthorized = new Set(callerMemberships.map((m) => m.workspaceId));
+
+    // Get user's current memberships
+    const currentMemberships = await prisma.workspaceMember.findMany({
+      where: { userId },
+      select: { workspaceId: true, role: true, id: true },
+    });
+    const currentWsIds = new Set(currentMemberships.map((m) => m.workspaceId));
+
+    // Add new workspace memberships
+    for (const wsId of workspaceIds) {
+      if (!currentWsIds.has(wsId) && callerAuthorized.has(wsId)) {
+        await prisma.workspaceMember.create({
+          data: { userId, workspaceId: wsId, role: newRole },
+        });
+      }
+    }
+
+    // Remove memberships for deselected workspaces (only ones caller has access to)
+    const desiredSet = new Set(workspaceIds);
+    for (const membership of currentMemberships) {
+      if (
+        !desiredSet.has(membership.workspaceId) &&
+        callerAuthorized.has(membership.workspaceId) &&
+        membership.role !== "OWNER" // never remove OWNER
+      ) {
+        await prisma.workspaceMember.delete({ where: { id: membership.id } });
+      }
+    }
+
+    // Update role in all selected workspaces the caller controls
+    for (const wsId of workspaceIds) {
+      if (wsId !== workspaceId && callerAuthorized.has(wsId)) {
+        const existing = await prisma.workspaceMember.findUnique({
+          where: { userId_workspaceId: { userId, workspaceId: wsId } },
+        });
+        if (existing && existing.role !== "OWNER") {
+          await prisma.workspaceMember.update({
+            where: { id: existing.id },
+            data: { role: newRole },
+          });
+        }
+      }
+    }
+  }
+
+  return NextResponse.json({ success: true });
+}
+
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

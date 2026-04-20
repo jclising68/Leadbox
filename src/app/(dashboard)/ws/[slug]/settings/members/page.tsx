@@ -32,7 +32,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Plus, Loader2, Trash2, UserPlus, X, AlertCircle } from "lucide-react";
+import { Plus, Loader2, Trash2, UserPlus, X, AlertCircle, Pencil } from "lucide-react";
 
 function headers(wId: string) {
   return { "x-workspace-id": wId, "Content-Type": "application/json" };
@@ -55,6 +55,14 @@ export default function MembersPage() {
   const [role, setRole] = useState("MEMBER");
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<string[]>([]);
   const [dismissedUserIds, setDismissedUserIds] = useState<Set<string>>(new Set());
+  const [editingMember, setEditingMember] = useState<{
+    userId: string;
+    name: string | null;
+    email: string;
+    role: string;
+  } | null>(null);
+  const [editRole, setEditRole] = useState("MEMBER");
+  const [editWorkspaceIds, setEditWorkspaceIds] = useState<string[]>([]);
 
   const { data: allWorkspaces } = useWorkspaces();
 
@@ -166,6 +174,72 @@ export default function MembersPage() {
       toast.success("Member removed");
     },
   });
+
+  // Fetch memberships for the user being edited
+  const { data: editMemberships } = useQuery({
+    queryKey: ["user-memberships", editingMember?.userId],
+    queryFn: async () => {
+      const res = await fetch(`/api/users/${editingMember!.userId}/memberships`, {
+        headers: headers(workspaceId!),
+        cache: "no-store",
+      });
+      if (!res.ok) return [];
+      return res.json() as Promise<{ workspaceId: string; role: string }[]>;
+    },
+    enabled: !!editingMember && !!workspaceId,
+  });
+
+  // Pre-fill edit workspace checkboxes when memberships load
+  useEffect(() => {
+    if (editMemberships && editingMember) {
+      setEditWorkspaceIds(editMemberships.map((m) => m.workspaceId));
+    }
+  }, [editMemberships, editingMember]);
+
+  const updateMember = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
+        method: "PATCH",
+        headers: headers(workspaceId!),
+        body: JSON.stringify({
+          userId: editingMember!.userId,
+          role: editRole,
+          workspaceIds: editWorkspaceIds,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["members"] });
+      setEditingMember(null);
+      toast.success("Member updated");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  function openEditDialog(member: {
+    role: string;
+    user: { id: string; name: string | null; email: string };
+  }) {
+    setEditingMember({
+      userId: member.user.id,
+      name: member.user.name,
+      email: member.user.email,
+      role: member.role,
+    });
+    setEditRole(member.role);
+    setEditWorkspaceIds([]); // will be filled by the query
+  }
+
+  function toggleEditWorkspace(id: string) {
+    setEditWorkspaceIds((prev) =>
+      prev.includes(id) ? prev.filter((w) => w !== id) : [...prev, id]
+    );
+  }
 
   function toggleWorkspace(id: string) {
     setSelectedWorkspaceIds((prev) =>
@@ -384,13 +458,24 @@ export default function MembersPage() {
                   </TableCell>
                   <TableCell>
                     {m.role !== "OWNER" && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeMember.mutate(m.user.id)}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openEditDialog(m)}
+                          title="Edit member"
+                        >
+                          <Pencil className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeMember.mutate(m.user.id)}
+                          title="Remove member"
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
                     )}
                   </TableCell>
                 </TableRow>
@@ -399,6 +484,93 @@ export default function MembersPage() {
           </TableBody>
         </Table>
       )}
+
+      {/* Edit member dialog */}
+      <Dialog
+        open={!!editingMember}
+        onOpenChange={(v) => !v && setEditingMember(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Member</DialogTitle>
+          </DialogHeader>
+          {editingMember && (
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <Label className="text-muted-foreground text-xs">Member</Label>
+                <p className="text-sm font-medium">
+                  {editingMember.name || editingMember.email}
+                </p>
+                {editingMember.name && (
+                  <p className="text-xs text-muted-foreground">
+                    {editingMember.email}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Role</Label>
+                <Select value={editRole} onValueChange={(v) => v && setEditRole(v)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ADMIN">Admin</SelectItem>
+                    <SelectItem value="MEMBER">Member</SelectItem>
+                    <SelectItem value="VIEWER">Viewer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Workspace Access</Label>
+                <p className="text-xs text-muted-foreground">
+                  Select which workspaces this member can access
+                </p>
+                <div className="border rounded-md max-h-48 overflow-y-auto">
+                  {workspaces.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">
+                      No workspaces found
+                    </div>
+                  ) : (
+                    workspaces.map((ws: Workspace) => (
+                      <label
+                        key={ws.id}
+                        className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50 cursor-pointer border-b last:border-b-0"
+                      >
+                        <Checkbox
+                          checked={editWorkspaceIds.includes(ws.id)}
+                          onCheckedChange={() => toggleEditWorkspace(ws.id)}
+                        />
+                        <span className="text-sm">{ws.name}</span>
+                        {ws.id === workspaceId && (
+                          <span className="text-[10px] text-muted-foreground ml-auto">
+                            current
+                          </span>
+                        )}
+                      </label>
+                    ))
+                  )}
+                </div>
+                {editWorkspaceIds.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {editWorkspaceIds.length} workspace
+                    {editWorkspaceIds.length > 1 ? "s" : ""} selected
+                  </p>
+                )}
+              </div>
+              <Button
+                className="w-full"
+                onClick={() => updateMember.mutate()}
+                disabled={editWorkspaceIds.length === 0 || updateMember.isPending}
+              >
+                {updateMember.isPending && (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                )}
+                Save Changes
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -16,6 +16,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -250,8 +256,20 @@ function StatusCell({
         body: JSON.stringify({ id: prospectId, leadStatus: newStatus }),
       });
       if (!res.ok) throw new Error("Failed to update");
-      toast.success("Status updated");
-      await queryClient.invalidateQueries({ queryKey: ["prospects"] });
+      const result = await res.json();
+      const sync = result.providerSync;
+      if (sync?.ok) {
+        toast.success(`Tag updated & synced to ${sync.provider}`);
+      } else if (sync && !sync.ok) {
+        toast.success("Tag updated locally", { description: `${sync.provider} sync: ${sync.error}` });
+      } else {
+        toast.success("Tag updated");
+      }
+      // Invalidate both prospects and threads so inbox reflects the change
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["prospects"] }),
+        queryClient.invalidateQueries({ queryKey: ["threads"] }),
+      ]);
     } catch {
       toast.error("Failed to update status");
     } finally {
@@ -361,7 +379,11 @@ export default function LeadsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [replyProspect, setReplyProspect] = useState<Record<string, unknown> | null>(null);
+  const [replyMessages, setReplyMessages] = useState<Record<string, unknown>[]>([]);
+  const [replyLoading, setReplyLoading] = useState(false);
   const router = useRouter();
+  const workspaceId = useCurrentWorkspaceId();
   const { setSelectedThread, setView, setSelectedLabel, clearFilters: clearInboxFilters } = useInboxStore();
   const { data: labels } = useLabels();
 
@@ -421,6 +443,30 @@ export default function LeadsPage() {
       router.push(`/ws/${slug}/inbox`);
     }
   }, [setSelectedThread, setView, setSelectedLabel, clearInboxFilters, router, slug]);
+
+  const openReplyPopup = useCallback(async (prospect: Record<string, unknown>) => {
+    const thread = prospect.thread as Record<string, unknown> | null;
+    if (!thread?.id) return;
+    setReplyProspect(prospect);
+    setReplyMessages([]);
+    setReplyLoading(true);
+    try {
+      const res = await fetch(`/api/threads/${thread.id}`, {
+        headers: {
+          "x-workspace-id": workspaceId || "",
+        },
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setReplyMessages((data.messages || []) as Record<string, unknown>[]);
+      }
+    } catch {
+      // silently fail - dialog will show empty
+    } finally {
+      setReplyLoading(false);
+    }
+  }, [workspaceId]);
 
   const hasFilters = !!labelFilter || !!channelFilter || !!dateFrom || !!dateTo || !!statusFilter;
 
@@ -675,7 +721,7 @@ export default function LeadsPage() {
                     "hover:bg-muted/50",
                     thread && (thread as Record<string, unknown>).isUnread ? "bg-primary/[0.02]" : ""
                   )}
-                  onClick={() => openThread(thread?.id as string | null)}
+                  onClick={() => openReplyPopup(p)}
                 >
                   {/* Date */}
                   <div className="shrink-0 px-3 text-xs text-muted-foreground" style={{ width: `${COLUMNS[0].w}px` }}>
@@ -766,6 +812,117 @@ export default function LeadsPage() {
           </div>
         )}
       </div>
+
+      {/* Reply popup dialog */}
+      <Dialog open={!!replyProspect} onOpenChange={(v) => !v && setReplyProspect(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-4 w-4" />
+              <span className="truncate">
+                {replyProspect
+                  ? `${(replyProspect.firstName as string) || ""} ${(replyProspect.lastName as string) || ""}`.trim() || (replyProspect.email as string)
+                  : "Messages"}
+              </span>
+              {replyProspect?.email ? (
+                <span className="text-xs font-normal text-muted-foreground truncate">
+                  {String(replyProspect.email)}
+                </span>
+              ) : null}
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Prospect info bar */}
+          {replyProspect && (
+            <div className="flex items-center gap-4 text-xs text-muted-foreground border-b pb-3">
+              {replyProspect.company ? (
+                <span>{String(replyProspect.company)}</span>
+              ) : null}
+              {replyProspect.title ? (
+                <span>{String(replyProspect.title)}</span>
+              ) : null}
+              {replyProspect.campaignName ? (
+                <span>Campaign: {String(replyProspect.campaignName)}</span>
+              ) : null}
+            </div>
+          )}
+
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto space-y-4 min-h-0 py-2">
+            {replyLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : replyMessages.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground text-sm">
+                No messages found
+              </div>
+            ) : (
+              replyMessages.map((msg) => {
+                const isInbound = String(msg.direction) === "INBOUND";
+                const body = String(msg.bodyText || msg.messageText || "");
+                const subject = String(msg.subject || "");
+                const from = String(msg.fromEmail || msg.linkedinFrom || "");
+                const sentAt = String(msg.sentAt || msg.receivedAt || "");
+                return (
+                  <div
+                    key={msg.id as string}
+                    className={cn(
+                      "rounded-lg border p-4",
+                      isInbound
+                        ? "bg-primary/5 border-primary/20"
+                        : "bg-muted/30"
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[10px]",
+                            isInbound ? "text-primary border-primary/30" : "text-muted-foreground"
+                          )}
+                        >
+                          {isInbound ? "Reply" : "Sent"}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground truncate max-w-[200px]">
+                          {from}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground shrink-0">
+                        {sentAt ? formatFullDateTime(sentAt) : ""}
+                      </span>
+                    </div>
+                    {subject && (
+                      <p className="text-xs font-medium mb-1.5">{subject}</p>
+                    )}
+                    <div className="text-sm whitespace-pre-wrap leading-relaxed">
+                      {body || <span className="text-muted-foreground italic">No content</span>}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Footer with View in Inbox button */}
+          {replyProspect && !!(replyProspect.thread as Record<string, unknown>)?.id && (
+            <div className="border-t pt-3 flex justify-end">
+              <button
+                onClick={() => {
+                  const threadId = (replyProspect.thread as Record<string, unknown>).id as string;
+                  setReplyProspect(null);
+                  openThread(threadId);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                <Mail className="h-3.5 w-3.5" />
+                View in Inbox
+              </button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { workspaceJson } from "@/lib/api-response";
+import { syncProviderTags } from "@/services/provider-tags";
 import type { Prisma } from "@prisma/client";
 
 export async function PATCH(req: NextRequest) {
@@ -33,9 +34,10 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  // Ensure the prospect belongs to this workspace
+  // Ensure the prospect belongs to this workspace (include thread for tag sync)
   const prospect = await prisma.prospect.findFirst({
     where: { id, workspaceId: workspaceId! },
+    include: { thread: { select: { id: true } } },
   });
 
   if (!prospect) {
@@ -47,7 +49,51 @@ export async function PATCH(req: NextRequest) {
     data,
   });
 
-  return NextResponse.json({ prospect: updated });
+  // When leadStatus changes, sync the tag to the thread (inbox) and provider
+  let providerSync = null;
+  if (leadStatus !== undefined && prospect.thread) {
+    const threadId = prospect.thread.id;
+
+    if (leadStatus) {
+      // Find or verify the label exists in this workspace
+      const label = await prisma.label.findFirst({
+        where: {
+          workspaceId: workspaceId!,
+          name: { equals: leadStatus, mode: "insensitive" },
+        },
+      });
+
+      if (label) {
+        // Remove all existing MANUAL labels from this thread first
+        const existingLabels = await prisma.threadLabel.findMany({
+          where: { threadId, source: "MANUAL" },
+          select: { id: true, labelId: true },
+        });
+        for (const tl of existingLabels) {
+          if (tl.labelId !== label.id) {
+            await prisma.threadLabel.delete({ where: { id: tl.id } });
+          }
+        }
+
+        // Upsert the new label
+        await prisma.threadLabel.upsert({
+          where: { threadId_labelId: { threadId, labelId: label.id } },
+          update: { source: "MANUAL", appliedAt: new Date() },
+          create: { threadId, labelId: label.id, source: "MANUAL" },
+        });
+      }
+    } else {
+      // Clearing the status — remove all MANUAL labels
+      await prisma.threadLabel.deleteMany({
+        where: { threadId, source: "MANUAL" },
+      });
+    }
+
+    // Push updated tags to Instantly/HeyReach
+    providerSync = await syncProviderTags(workspaceId!, threadId);
+  }
+
+  return NextResponse.json({ prospect: updated, providerSync });
 }
 
 export async function GET(req: NextRequest) {
