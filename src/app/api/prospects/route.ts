@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
   const dateFrom = url.searchParams.get("dateFrom");
   const dateTo = url.searchParams.get("dateTo");
   const hasReply = url.searchParams.get("hasReply");
+  const actionable = url.searchParams.get("actionable");
   const leadStatusFilter = url.searchParams.get("leadStatus");
 
   const where: Prisma.ProspectWhereInput = {
@@ -103,25 +104,36 @@ export async function GET(req: NextRequest) {
       ...where.thread as Prisma.ThreadWhereInput,
       messages: { some: { direction: "INBOUND" } },
     };
-    // Exclude non-actionable campaign statuses but keep NULL (unset) statuses.
-    // SQL gotcha: NOT (NULL IN (...)) = NULL → treated as false, which would
-    // exclude every prospect with no leadStatus. Use OR to handle NULLs.
+  }
+
+  // Show "actionable" leads: those that have replied OR have a meaningful
+  // status/tag. This ensures tagged leads from Instantly (e.g. "Not Interested")
+  // appear even if their reply email hasn't been synced yet.
+  if (actionable === "true") {
     where.AND = [
       ...(Array.isArray(where.AND) ? where.AND : []),
       {
         OR: [
-          { leadStatus: { equals: null } },
+          // Lead has at least one inbound message (replied)
+          { thread: { messages: { some: { direction: "INBOUND" } } } },
+          // Lead has a meaningful status (not a generic campaign status)
           {
             leadStatus: {
               notIn: [
+                "Not Started", "not started",
+                "In Progress", "in progress",
                 "In Sequence", "in sequence",
+                "Paused", "paused",
                 "Completed", "completed",
                 "Not Yet Contacted", "not yet contacted",
-                "In Progress", "in progress",
-                "Paused", "paused",
+                "Lead", "lead",
+                "Bounced", "bounced",
+                "Unsubscribed", "unsubscribed",
               ],
             },
           },
+          // Lead has thread labels applied (tags from Instantly)
+          { thread: { threadLabels: { some: {} } } },
         ],
       },
     ];

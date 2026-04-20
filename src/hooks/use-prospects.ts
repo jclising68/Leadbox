@@ -53,7 +53,7 @@ export function useProspects({
       if (dateTo) params.set("dateTo", dateTo);
       if (leadStatus) params.set("leadStatus", leadStatus);
       if (pageParam) params.set("cursor", pageParam);
-      params.set("hasReply", "true");
+      params.set("actionable", "true");
       params.set("limit", "100");
 
       const res = await fetch(`/api/prospects?${params}`, {

@@ -43,6 +43,21 @@ function colorForStatus(name: string): string {
   return "#8B5CF6"; // violet (default)
 }
 
+// Case-insensitive payload field extraction. Instantly leads carry a `payload`
+// object with every column from the original CSV upload. Column names vary
+// wildly ("company", "Company Name", "company_name", …) so we try many common
+// variations and return the first truthy string value.
+function extractFromPayload(
+  payload: Record<string, unknown>,
+  ...keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const val = payload[key];
+    if (val && typeof val === "string" && val.trim()) return val.trim();
+  }
+  return undefined;
+}
+
 // Instantly campaign status mapping (lead progress through campaign)
 function getCampaignStatus(status: number | undefined, replyCount: number | undefined): string {
   if (replyCount && replyCount > 0) return "Replied";
@@ -145,12 +160,137 @@ type InstantlyLead = {
 
 type InstantlyCustomTag = { id: string; label: string };
 
+// Cached prospect data from pre-fetch — used during enrichment loop to
+// determine whether a lead already exists and to access its thread ID.
+type CachedProspect = {
+  email: string | null;
+  linkedinUrl: string | null;
+  notes: string | null;
+  thread: {
+    id: string;
+    messages: { bodyText: string | null; messageText: string | null }[];
+  } | null;
+};
+
+// Non-actionable campaign statuses that indicate "just in a sequence" — these
+// leads haven't engaged in any meaningful way. Used to decide whether to
+// import a lead that only has a campaign status (no reply, no tag).
+const NON_ACTIONABLE_STATUSES = new Set([
+  "Not Started", "In Progress", "Paused", "Completed", "Lead",
+  "Bounced", "Unsubscribed",
+]);
+
+/**
+ * Build the enrichment update data for a single Instantly lead.
+ * Shared between the import (new) and update (existing) paths.
+ */
+function buildUpdateData(
+  lead: InstantlyLead,
+  email: string,
+  existingLinkedinUrl: string | null,
+  statusLabel: string,
+  campaignNameMap: Map<string, string>,
+) {
+  const payload = lead.payload || {};
+  const updateData: Record<string, unknown> = {};
+
+  // First name
+  updateData.firstName =
+    lead.first_name ||
+    extractFromPayload(payload, "first_name", "firstName", "First Name", "First name", "first") ||
+    undefined;
+
+  // Last name
+  updateData.lastName =
+    lead.last_name ||
+    extractFromPayload(payload, "last_name", "lastName", "Last Name", "Last name", "last") ||
+    undefined;
+
+  // Company
+  updateData.company =
+    lead.company_name ||
+    extractFromPayload(
+      payload,
+      "company", "Company", "company_name", "companyName", "Company Name",
+      "organization", "Organization", "org", "Org", "account", "Account",
+      "company_name_for_emails",
+    ) ||
+    undefined;
+
+  // Domain — top-level > payload > derived from email
+  updateData.domain =
+    lead.company_domain ||
+    extractFromPayload(
+      payload,
+      "domain", "Domain", "company_domain", "companyDomain", "Company Domain",
+      "website", "Website", "url", "URL", "company_url", "company_website",
+    ) ||
+    email.split("@")[1] ||
+    undefined;
+
+  // Phone
+  updateData.phone =
+    lead.phone ||
+    extractFromPayload(
+      payload,
+      "phone", "Phone", "phone_number", "phoneNumber", "Phone Number",
+      "mobile", "Mobile", "mobile_phone", "direct_phone", "Direct Phone",
+      "work_phone", "Work Phone", "cell", "Cell",
+    ) ||
+    undefined;
+
+  // Title / Job Title
+  updateData.title =
+    extractFromPayload(
+      payload,
+      "title", "Title", "job_title", "jobTitle", "Job Title",
+      "position", "Position", "role", "Role", "designation", "Designation",
+    ) ||
+    undefined;
+
+  // LinkedIn URL — only fill if prospect doesn't already have one
+  if (!existingLinkedinUrl) {
+    const linkedinUrl = extractFromPayload(
+      payload,
+      "linkedin", "LinkedIn", "linkedin_url", "linkedinUrl", "LinkedIn URL",
+      "linkedin_profile", "li_url", "LinkedInURL",
+    );
+    if (linkedinUrl) updateData.linkedinUrl = linkedinUrl;
+  }
+
+  // Lead status
+  updateData.leadStatus = statusLabel;
+
+  // Campaign name
+  if (lead.campaign && campaignNameMap.has(lead.campaign)) {
+    updateData.campaignName = campaignNameMap.get(lead.campaign);
+  }
+
+  // Step replied
+  if (lead.email_reply_count && lead.email_reply_count > 0) {
+    updateData.stepReplied = `Step ${(lead.email_opened_step || 0) + 1}`;
+  }
+
+  // Source date
+  if (lead.timestamp_created) {
+    updateData.sourceDate = new Date(lead.timestamp_created);
+  }
+
+  // Strip undefined values so Prisma doesn't overwrite existing data with null
+  for (const key of Object.keys(updateData)) {
+    if (updateData[key] === undefined) delete updateData[key];
+  }
+
+  return updateData;
+}
+
 export async function enrichFromInstantly(
   integrationId: string,
   /** Total milliseconds this enrichment run is allowed to use. Default 120s. */
   timeBudgetMs = 120_000,
 ): Promise<{
   enriched: number;
+  imported: number;
   campaigns: number;
   errors: number;
 }> {
@@ -164,9 +304,7 @@ export async function enrichFromInstantly(
 
   console.log(`[enrich] Starting enrichment for integration ${integrationId} (budget: ${Math.round(timeBudgetMs / 1000)}s)`);
 
-  // 1. Get campaigns once for name lookup. Limit 100 covers any realistic
-  //    workspace; we only use these names to populate `campaignName` on the
-  //    prospect, not to drive iteration anymore.
+  // 1. Get campaigns once for name lookup.
   const campaignData = await rateLimitedGet(apiKey, "/campaigns", { limit: "100" });
   const campaigns = (campaignData.items || []) as { id: string; name: string }[];
   console.log(`[enrich] Found ${campaigns.length} campaigns`);
@@ -174,11 +312,7 @@ export async function enrichFromInstantly(
   const campaignNameMap = new Map<string, string>();
   for (const c of campaigns) campaignNameMap.set(c.id, c.name);
 
-  // 1b. Pre-fetch custom tags — these are the free-form tags applied in
-  //    Instantly's UI (separate from the Status dropdown's lt_interest_status).
-  //    We map id → label so we can translate lead.custom_tag_ids back to names
-  //    and apply them on the thread. Without this, anything the user tagged
-  //    manually in Instantly would never reflect in LeadBox.
+  // 1b. Pre-fetch custom tags (free-form tags from Instantly UI).
   const customTagById = new Map<string, string>();
   try {
     const tagsData = await rateLimitedGet(apiKey, "/custom-tags", { limit: "100" });
@@ -189,7 +323,7 @@ export async function enrichFromInstantly(
     console.warn(`[enrich] Failed to load custom tags (continuing without):`, err instanceof Error ? err.message : err);
   }
 
-  // 2. Pre-fetch labels.
+  // 2. Pre-fetch workspace labels.
   const allLabels = await prisma.label.findMany({
     where: { workspaceId },
     select: { id: true, name: true },
@@ -198,21 +332,14 @@ export async function enrichFromInstantly(
     allLabels.map((l) => [l.name.toLowerCase(), l])
   );
 
-  // 3. Fetch only EMAIL-channel prospects (Instantly conversations live there;
-  //    HeyReach prospects can have an email too but they aren't in Instantly).
-  //    Order by `updatedAt ASC` so the stalest prospects are refreshed first —
-  //    over multiple cron cycles this guarantees every prospect eventually
-  //    gets enriched even when a workspace has more prospects than the time
-  //    budget can cover in one run.
-  const prospects = await prisma.prospect.findMany({
-    where: {
-      workspaceId,
-      email: { not: null },
-      thread: { channel: "EMAIL" },
-    },
+  // 3. Pre-fetch ALL existing prospects (with thread data) into a Map for
+  //    O(1) lookup. This lets us skip per-prospect API calls entirely — we
+  //    iterate Instantly leads once and match them locally.
+  const existingProspects = await prisma.prospect.findMany({
+    where: { workspaceId, email: { not: null } },
     select: {
-      id: true,
       email: true,
+      linkedinUrl: true,
       notes: true,
       thread: {
         select: {
@@ -226,164 +353,177 @@ export async function enrichFromInstantly(
         },
       },
     },
-    orderBy: { updatedAt: "asc" },
   });
+  const prospectByEmail = new Map<string, CachedProspect>(
+    existingProspects.map((p) => [p.email!.toLowerCase(), p])
+  );
+  console.log(`[enrich] ${prospectByEmail.size} existing prospects in workspace`);
 
-  console.log(`[enrich] ${prospects.length} email-channel prospects to refresh`);
-
+  // 4. Paginate through ALL Instantly leads. For each lead:
+  //    - If prospect exists in DB → update (enrich)
+  //    - If prospect is new AND the lead has replied or been tagged → create (import)
+  //    Over multiple cron cycles the cursor progresses through the full list.
+  let cursor: string | undefined;
   let enriched = 0;
+  let imported = 0;
   let errors = 0;
   let processed = 0;
+  let pages = 0;
 
-  // 4. For each prospect, look up their lead in Instantly via search.
-  //    This is O(prospects) — the previous campaign-walking approach was
-  //    O(all_instantly_leads) and timed out before reaching most prospects.
-  for (const prospect of prospects) {
-    if (Date.now() - startTime > timeBudgetMs) {
-      console.log(`[enrich] Time budget exhausted at ${processed}/${prospects.length} prospects (${enriched} enriched)`);
-      break;
-    }
-    if (!prospect.email) continue;
+  while (Date.now() - startTime < timeBudgetMs) {
+    const data = await rateLimitedPost(apiKey, "/leads/list", {
+      limit: 100,
+      ...(cursor ? { starting_after: cursor } : {}),
+    });
+    const items = (data.items || []) as InstantlyLead[];
+    pages++;
 
-    processed++;
+    if (items.length === 0) break;
+    console.log(`[enrich] Page ${pages}: ${items.length} leads`);
 
-    try {
-      const data = await rateLimitedPost(apiKey, "/leads/list", {
-        search: prospect.email,
-        limit: 10,
-      });
-      const items = (data.items || []) as InstantlyLead[];
+    for (const lead of items) {
+      if (Date.now() - startTime > timeBudgetMs) break;
+      if (!lead.email) continue;
+      processed++;
 
-      // Pick the exact email match — `search` can return fuzzy matches.
-      const lead = items.find(
-        (l) => l.email?.toLowerCase() === prospect.email!.toLowerCase()
-      );
-      if (!lead) continue;
+      try {
+        const emailLower = lead.email.toLowerCase();
+        const existing = prospectByEmail.get(emailLower);
 
-      // Map interest status. `0`/null/undefined mean "not set" — only look
-      // up labels for known values. Previously the `>= 0` guard was dropping
-      // every Not Interested (-1), Wrong Person (-2), Lost (-3), and Out of
-      // Office (-4), which is why those statuses never reflected in LeadBox.
-      const rawInterest = lead.lt_interest_status;
-      const interestLabel =
-        rawInterest !== undefined && rawInterest !== null && rawInterest !== 0
-          ? INTEREST_STATUS_MAP[rawInterest]
-          : undefined;
-      // Surface unknown codes in logs so we can expand the map rather than
-      // silently dropping data. (Keeps volume low — only logs if non-zero
-      // and unmapped.)
-      if (rawInterest !== undefined && rawInterest !== null && rawInterest !== 0 && !interestLabel) {
-        console.warn(`[enrich] Unknown lt_interest_status=${rawInterest} for ${prospect.email}`);
-      }
-      const statusLabel =
-        interestLabel || getCampaignStatus(lead.status, lead.email_reply_count);
+        // Map interest status
+        const rawInterest = lead.lt_interest_status;
+        const interestLabel =
+          rawInterest !== undefined && rawInterest !== null && rawInterest !== 0
+            ? INTEREST_STATUS_MAP[rawInterest]
+            : undefined;
+        if (rawInterest !== undefined && rawInterest !== null && rawInterest !== 0 && !interestLabel) {
+          console.warn(`[enrich] Unknown lt_interest_status=${rawInterest} for ${lead.email}`);
+        }
+        const statusLabel =
+          interestLabel || getCampaignStatus(lead.status, lead.email_reply_count);
 
-      // Resolve any manually-applied custom tags from Instantly UI.
-      // These coexist with the Status dropdown, so a lead can have both
-      // an interest status AND additional free-form tags.
-      const customTagLabels = (lead.custom_tag_ids ?? [])
-        .map((id) => customTagById.get(id))
-        .filter((name): name is string => !!name);
+        // Resolve custom tags
+        const customTagLabels = (lead.custom_tag_ids ?? [])
+          .map((id) => customTagById.get(id))
+          .filter((name): name is string => !!name);
 
-      // Determine step replied
-      let stepReplied: string | undefined;
-      if (lead.email_reply_count && lead.email_reply_count > 0) {
-        stepReplied = `Step ${(lead.email_opened_step || 0) + 1}`;
-      }
+        // Build update data
+        const updateData = buildUpdateData(
+          lead, lead.email,
+          existing?.linkedinUrl ?? null,
+          statusLabel, campaignNameMap,
+        );
 
-      const updateData: Record<string, unknown> = {};
-      if (lead.first_name) updateData.firstName = lead.first_name;
-      if (lead.last_name) updateData.lastName = lead.last_name;
-      if (lead.company_name) updateData.company = lead.company_name;
-      if (lead.company_domain) updateData.domain = lead.company_domain;
-      if (lead.phone) updateData.phone = lead.phone;
-      updateData.leadStatus = statusLabel;
-      if (lead.campaign && campaignNameMap.has(lead.campaign)) {
-        updateData.campaignName = campaignNameMap.get(lead.campaign);
-      }
-      if (stepReplied) updateData.stepReplied = stepReplied;
+        let threadId: string | null = null;
 
-      if (lead.timestamp_created) {
-        updateData.sourceDate = new Date(lead.timestamp_created);
-      }
-
-      // Extract title from payload if available
-      const payload = lead.payload || {};
-      if (payload.title || payload.Title || payload.jobTitle || payload.job_title) {
-        updateData.title = (payload.title || payload.Title || payload.jobTitle || payload.job_title) as string;
-      }
-      if (payload.phone || payload.Phone || payload.phoneNumber) {
-        updateData.phone = (updateData.phone as string | undefined) || (payload.phone || payload.Phone || payload.phoneNumber) as string;
-      }
-
-      // Set notes to latest reply if not already set
-      if (!prospect.notes) {
-        const latestReply = prospect.thread?.messages?.[0];
-        if (latestReply) {
-          const replyText = latestReply.bodyText || latestReply.messageText;
-          if (replyText) {
-            updateData.notes = replyText.slice(0, 500);
+        if (existing) {
+          // ---- UPDATE existing prospect ----
+          // Set notes to latest reply if not already set
+          if (!existing.notes && existing.thread?.messages?.[0]) {
+            const reply = existing.thread.messages[0];
+            const replyText = reply.bodyText || reply.messageText;
+            if (replyText) updateData.notes = replyText.slice(0, 500);
           }
-        }
-      }
 
-      await prisma.prospect.update({
-        where: { workspaceId_email: { workspaceId, email: prospect.email } },
-        data: updateData,
-      });
-      enriched++;
-
-      // Apply all labels that came from Instantly — interest status + any
-      // manual custom tags. De-duped case-insensitively so a tag named
-      // "Interested" doesn't also get applied as a separate "INTERESTED".
-      if (prospect.thread) {
-        const labelsToApply = new Map<string, string>(); // lowercaseKey -> originalName
-        if (interestLabel) {
-          labelsToApply.set(interestLabel.toLowerCase(), interestLabel);
-        }
-        for (const tagName of customTagLabels) {
-          labelsToApply.set(tagName.toLowerCase(), tagName);
-        }
-
-        for (const [lowerKey, labelName] of labelsToApply) {
-          let label = labelByName.get(lowerKey);
-          if (!label) {
-            label = await prisma.label.upsert({
-              where: {
-                workspaceId_name: { workspaceId, name: labelName },
-              },
-              create: {
-                workspaceId,
-                name: labelName,
-                color: colorForStatus(labelName),
-              },
-              update: {},
-              select: { id: true, name: true },
-            });
-            labelByName.set(lowerKey, label);
-          }
-          await prisma.threadLabel.upsert({
-            where: {
-              threadId_labelId: { threadId: prospect.thread.id, labelId: label.id },
-            },
-            create: {
-              threadId: prospect.thread.id,
-              labelId: label.id,
-              source: "WEBHOOK",
-              confidence: 1.0,
-            },
-            update: {},
+          await prisma.prospect.update({
+            where: { workspaceId_email: { workspaceId, email: lead.email } },
+            data: updateData,
           });
+          threadId = existing.thread?.id ?? null;
+          enriched++;
+        } else {
+          // ---- IMPORT new lead ----
+          // Only import leads that are actionable: replied, tagged, or have
+          // a meaningful interest status. Skip leads just sitting in a
+          // campaign with no engagement — they'd clutter the leads page.
+          const hasReply = (lead.email_reply_count ?? 0) > 0;
+          const hasTag = interestLabel || customTagLabels.length > 0;
+          if (!hasReply && !hasTag && NON_ACTIONABLE_STATUSES.has(statusLabel)) {
+            continue; // Not interesting yet — skip import
+          }
+
+          try {
+            const prospect = await prisma.prospect.create({
+              data: {
+                workspaceId,
+                email: lead.email,
+                ...updateData,
+              },
+            });
+            const thread = await prisma.thread.create({
+              data: {
+                workspaceId,
+                prospectId: prospect.id,
+                channel: "EMAIL",
+                status: "OPEN",
+                isUnread: false,
+                lastMessageAt: (updateData.sourceDate as Date) || new Date(),
+              },
+            });
+            threadId = thread.id;
+            // Cache so we don't try to create again on a later page
+            prospectByEmail.set(emailLower, {
+              email: lead.email,
+              linkedinUrl: (updateData.linkedinUrl as string) ?? null,
+              notes: null,
+              thread: { id: thread.id, messages: [] },
+            });
+            imported++;
+          } catch (err: unknown) {
+            // P2002 = unique constraint — prospect was created by a concurrent sync
+            if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "P2002") {
+              // Already exists — just skip, will enrich on next cycle
+              prospectByEmail.set(emailLower, { email: lead.email, linkedinUrl: null, notes: null, thread: null });
+              continue;
+            }
+            throw err;
+          }
+        }
+
+        // Apply labels (interest status + custom tags) to thread
+        if (threadId) {
+          const labelsToApply = new Map<string, string>();
+          if (interestLabel) {
+            labelsToApply.set(interestLabel.toLowerCase(), interestLabel);
+          }
+          for (const tagName of customTagLabels) {
+            labelsToApply.set(tagName.toLowerCase(), tagName);
+          }
+
+          for (const [lowerKey, labelName] of labelsToApply) {
+            let label = labelByName.get(lowerKey);
+            if (!label) {
+              label = await prisma.label.upsert({
+                where: { workspaceId_name: { workspaceId, name: labelName } },
+                create: { workspaceId, name: labelName, color: colorForStatus(labelName) },
+                update: {},
+                select: { id: true, name: true },
+              });
+              labelByName.set(lowerKey, label);
+            }
+            await prisma.threadLabel.upsert({
+              where: { threadId_labelId: { threadId, labelId: label.id } },
+              create: { threadId, labelId: label.id, source: "WEBHOOK", confidence: 1.0 },
+              update: {},
+            });
+          }
+        }
+      } catch (err) {
+        errors++;
+        if (errors <= 5) {
+          console.error(`[enrich] Error for ${lead.email}:`, err instanceof Error ? err.message : err);
         }
       }
-    } catch (err) {
-      errors++;
-      if (errors <= 3) {
-        console.error(`[enrich] Error for ${prospect.email}:`, err instanceof Error ? err.message : err);
-      }
     }
+
+    cursor = data.next_starting_after as string | undefined;
+    if (!cursor || items.length < 100) break;
   }
 
-  console.log(`[enrich] Done: ${enriched}/${processed} enriched, ${campaigns.length} campaigns, ${errors} errors`);
-  return { enriched, campaigns: campaigns.length, errors };
+  if (Date.now() - startTime >= timeBudgetMs) {
+    console.log(`[enrich] Time budget exhausted at page ${pages}, ${processed} leads processed — will continue next cycle`);
+  }
+
+  console.log(`[enrich] Done: ${enriched} enriched, ${imported} imported, ${campaigns.length} campaigns, ${errors} errors`);
+  return { enriched, imported, campaigns: campaigns.length, errors };
 }

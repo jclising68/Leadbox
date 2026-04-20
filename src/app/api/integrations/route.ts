@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
       if (provider === "INSTANTLY") {
         try {
           const enrichResult = await enrichFromInstantly(integration.id);
-          console.log(`[sync] Auto-enrichment done: ${enrichResult.enriched} enriched`);
+          console.log(`[sync] Auto-enrichment done: ${enrichResult.enriched} enriched, ${enrichResult.imported} imported`);
         } catch (err) {
           console.error(`[sync] Auto-enrichment failed:`, err);
         }

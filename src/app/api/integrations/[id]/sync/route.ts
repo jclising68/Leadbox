@@ -95,7 +95,7 @@ export async function POST(
         console.log(`[sync] Starting auto-enrichment for ${id}...`);
         try {
           const enrichResult = await enrichFromInstantly(integration.id);
-          console.log(`[sync] Auto-enrichment done for ${id}: ${enrichResult.enriched} enriched`);
+          console.log(`[sync] Auto-enrichment done for ${id}: ${enrichResult.enriched} enriched, ${enrichResult.imported} imported`);
         } catch (err) {
           console.error(`[sync] Auto-enrichment failed for ${id}:`, err instanceof Error ? err.message : err);
         }
