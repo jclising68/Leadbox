@@ -92,7 +92,7 @@ function formatFullDateTime(date: string | null) {
 }
 
 function CopyCell({ value, className }: { value: string; className?: string }) {
-  if (!value || value === "-") return <span className={cn("text-muted-foreground", className)}>-</span>;
+  if (!value || value === "-") return <span className={cn("text-muted-foreground/60", className)}>-</span>;
   return (
     <span className={cn("group/cell inline-flex items-center gap-1 max-w-full", className)}>
       <span className="truncate">{value}</span>
@@ -192,7 +192,7 @@ function EditableCell({
               setEditing(false);
             }
           }}
-          className="w-full h-7 px-1.5 py-0.5 text-xs bg-background border border-primary/50 rounded resize-none outline-none focus:ring-1 focus:ring-primary/30"
+          className="w-full h-7 px-1.5 py-0.5 text-xs bg-background text-foreground border border-input rounded-md resize-none outline-none focus:ring-2 focus:ring-ring/40"
           rows={1}
         />
         {saving && <Loader2 className="absolute right-1 top-1/2 -translate-y-1/2 h-3 w-3 animate-spin text-muted-foreground" />}
@@ -217,7 +217,7 @@ function EditableCell({
         {display || "-"}
       </span>
       {saving ? (
-        <Check className="h-3 w-3 shrink-0 text-green-500" />
+        <Check className="h-3 w-3 shrink-0 text-emerald-500" />
       ) : (
         <Pencil className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-opacity", display ? "opacity-0 group-hover/edit:opacity-100" : "opacity-40")} />
       )}
@@ -294,14 +294,18 @@ function StatusCell({
       >
         {matchedLabel ? (
           <span
-            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-white truncate max-w-full"
-            style={{ backgroundColor: matchedLabel.color }}
+            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium truncate max-w-full"
+            style={{
+              backgroundColor: `${matchedLabel.color}22`,
+              color: matchedLabel.color,
+              boxShadow: `inset 0 0 0 1px ${matchedLabel.color}40`,
+            }}
           >
             {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
             {matchedLabel.name}
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-dashed border-muted-foreground/30 text-[10px] text-muted-foreground hover:border-muted-foreground/60 hover:text-foreground transition-colors">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-dashed border-border text-[10px] text-muted-foreground hover:border-muted-foreground/60 hover:text-foreground transition-colors">
             <ChevronDown className="h-3 w-3" />
             Set tag
           </span>
@@ -321,7 +325,7 @@ function StatusCell({
         ))}
         {matchedLabel && (
           <>
-            <div className="border-t my-1" />
+            <div className="border-t border-border my-1" />
             <DropdownMenuItem
               onClick={(e) => { e.stopPropagation(); save(""); }}
               className="text-xs text-muted-foreground"
@@ -335,40 +339,30 @@ function StatusCell({
   );
 }
 
-// Provider icon component - Instantly blue bolt, HeyReach teal/green hand-wave
+// Provider icon component - Instantly blue bolt, HeyReach teal send
 function ProviderIcon({ provider, channel }: { provider: string | null; channel?: string | null }) {
   // Determine provider from explicit provider, or fall back to channel type
   const resolved = provider || (channel === "LINKEDIN" ? "HEYREACH" : channel === "EMAIL" ? "INSTANTLY" : null);
-  if (!resolved) return <span className="text-muted-foreground text-[10px]">-</span>;
+  if (!resolved) return <span className="text-muted-foreground/60 text-[10px]">-</span>;
 
   if (resolved === "INSTANTLY") {
     return (
-      <span title="Instantly" className="inline-flex items-center justify-center w-5 h-5 rounded-sm" style={{ backgroundColor: "rgba(59,130,246,0.15)" }}>
-        <Zap className="h-3 w-3 text-blue-500" />
+      <span
+        title="Instantly"
+        className="inline-flex items-center justify-center w-5 h-5 rounded-sm bg-blue-500/15 ring-1 ring-inset ring-blue-500/25"
+      >
+        <Zap className="h-3 w-3 text-blue-600 dark:text-blue-300" />
       </span>
     );
   }
-  // HeyReach brand color: #00BFA6 (teal) with Send icon
   return (
-    <span title="HeyReach" className="inline-flex items-center justify-center w-5 h-5 rounded-sm" style={{ backgroundColor: "rgba(0,191,166,0.15)" }}>
-      <Send className="h-3 w-3" style={{ color: "#00BFA6" }} />
+    <span
+      title="HeyReach"
+      className="inline-flex items-center justify-center w-5 h-5 rounded-sm bg-teal-500/15 ring-1 ring-inset ring-teal-500/20"
+    >
+      <Send className="h-3 w-3 text-teal-600 dark:text-teal-300" />
     </span>
   );
-}
-
-// Status badge color mapping
-function getStatusColor(status: string): string {
-  const s = status.toLowerCase();
-  if (s.includes("interested") && !s.includes("not")) return "bg-green-500";
-  if (s.includes("not interested")) return "bg-red-500";
-  if (s.includes("meeting booked") || s.includes("meeting completed")) return "bg-emerald-500";
-  if (s.includes("replied")) return "bg-blue-500";
-  if (s.includes("bounced")) return "bg-red-400";
-  if (s.includes("completed")) return "bg-gray-500";
-  if (s.includes("in progress")) return "bg-yellow-500";
-  if (s.includes("out of office")) return "bg-orange-400";
-  if (s.includes("closed")) return "bg-emerald-600";
-  return "bg-gray-400";
 }
 
 export default function LeadsPage() {
@@ -470,15 +464,22 @@ export default function LeadsPage() {
 
   const hasFilters = !!labelFilter || !!channelFilter || !!dateFrom || !!dateTo || !!statusFilter;
 
+  const filterTriggerBase =
+    "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors focus:outline-none focus:ring-2 focus:ring-ring/40";
+  const filterTriggerIdle =
+    "bg-card border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground";
+  const filterTriggerActive =
+    "bg-primary/10 border-primary/30 text-foreground";
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-background text-foreground">
       {/* Header */}
-      <div className="px-6 py-4 border-b shrink-0">
+      <div className="px-6 py-4 border-b border-border shrink-0 bg-background">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Users className="h-5 w-5 text-muted-foreground" />
-            <h1 className="text-lg font-semibold">Lead Tracker</h1>
-            <span className="text-sm text-muted-foreground">
+            <h1 className="text-lg font-semibold text-foreground">Lead Tracker</h1>
+            <span className="text-sm text-muted-foreground tabular-nums">
               {prospects.length}{hasNextPage ? "+" : ""} contacts
             </span>
           </div>
@@ -491,7 +492,7 @@ export default function LeadsPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search by name, email, company, domain..."
-              className="pl-9 h-9"
+              className="pl-9 h-9 bg-card border-input"
             />
             {search && (
               <button
@@ -505,12 +506,12 @@ export default function LeadsPage() {
 
           <DropdownMenu>
             <DropdownMenuTrigger className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors",
-              channelFilter ? "bg-primary/10 border-primary/30 text-primary" : "hover:bg-muted"
+              filterTriggerBase,
+              channelFilter ? filterTriggerActive : filterTriggerIdle
             )}>
               <Filter className="h-3.5 w-3.5" />
-              {channelFilter || "Channel"}
-              <ChevronDown className="h-3 w-3" />
+              <span>{channelFilter || "Channel"}</span>
+              <ChevronDown className="h-3 w-3 opacity-70" />
             </DropdownMenuTrigger>
             <DropdownMenuContent>
               <DropdownMenuItem onClick={() => setChannelFilter("")}>All</DropdownMenuItem>
@@ -525,12 +526,12 @@ export default function LeadsPage() {
 
           <DropdownMenu>
             <DropdownMenuTrigger className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors",
-              labelFilter ? "bg-primary/10 border-primary/30 text-primary" : "hover:bg-muted"
+              filterTriggerBase,
+              labelFilter ? filterTriggerActive : filterTriggerIdle
             )}>
               <Filter className="h-3.5 w-3.5" />
-              {labelFilter || "Label"}
-              <ChevronDown className="h-3 w-3" />
+              <span>{labelFilter || "Label"}</span>
+              <ChevronDown className="h-3 w-3 opacity-70" />
             </DropdownMenuTrigger>
             <DropdownMenuContent>
               <DropdownMenuItem onClick={() => setLabelFilter("")}>All labels</DropdownMenuItem>
@@ -545,12 +546,12 @@ export default function LeadsPage() {
 
           <DropdownMenu>
             <DropdownMenuTrigger className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors",
-              statusFilter ? "bg-primary/10 border-primary/30 text-primary" : "hover:bg-muted"
+              filterTriggerBase,
+              statusFilter ? filterTriggerActive : filterTriggerIdle
             )}>
               <Filter className="h-3.5 w-3.5" />
-              {statusFilter || "Status"}
-              <ChevronDown className="h-3 w-3" />
+              <span>{statusFilter || "Status"}</span>
+              <ChevronDown className="h-3 w-3 opacity-70" />
             </DropdownMenuTrigger>
             <DropdownMenuContent>
               <DropdownMenuItem onClick={() => setStatusFilter("")}>All statuses</DropdownMenuItem>
@@ -565,12 +566,14 @@ export default function LeadsPage() {
 
           <DropdownMenu>
             <DropdownMenuTrigger className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors",
-              (dateFrom || dateTo) ? "bg-primary/10 border-primary/30 text-primary" : "hover:bg-muted"
+              filterTriggerBase,
+              (dateFrom || dateTo) ? filterTriggerActive : filterTriggerIdle
             )}>
               <Calendar className="h-3.5 w-3.5" />
-              {dateFrom && dateTo ? `${dateFrom} - ${dateTo}` : dateFrom ? `From ${dateFrom}` : "Date"}
-              <ChevronDown className="h-3 w-3" />
+              <span className="tabular-nums">
+                {dateFrom && dateTo ? `${dateFrom} - ${dateTo}` : dateFrom ? `From ${dateFrom}` : "Date"}
+              </span>
+              <ChevronDown className="h-3 w-3 opacity-70" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
               <DropdownMenuItem onClick={() => { setDateFrom(""); setDateTo(""); }}>All time</DropdownMenuItem>
@@ -586,19 +589,27 @@ export default function LeadsPage() {
                 const d = new Date(); d.setDate(d.getDate() - 90);
                 setDateFrom(d.toISOString().split("T")[0]); setDateTo(new Date().toISOString().split("T")[0]);
               }}>Last 90 days</DropdownMenuItem>
-              <div className="border-t my-1" />
+              <div className="border-t border-border my-1" />
               <div className="px-3 py-2 space-y-3">
                 <span className="text-xs font-medium text-muted-foreground">Custom range</span>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-[11px] text-muted-foreground mb-1 block">Start date</label>
-                    <input type="date" className="w-full text-xs bg-background border rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary"
-                      value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+                    <input
+                      type="date"
+                      className="w-full text-xs bg-background text-foreground border border-input rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-ring/40"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                    />
                   </div>
                   <div>
                     <label className="text-[11px] text-muted-foreground mb-1 block">End date</label>
-                    <input type="date" className="w-full text-xs bg-background border rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary"
-                      value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+                    <input
+                      type="date"
+                      className="w-full text-xs bg-background text-foreground border border-input rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-ring/40"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                    />
                   </div>
                 </div>
                 {(dateFrom || dateTo) && (
@@ -625,10 +636,10 @@ export default function LeadsPage() {
       </div>
 
       {/* Table — single scroll container so header + body scroll together */}
-      <div ref={parentRef} className="flex-1 overflow-auto min-h-0">
+      <div ref={parentRef} className="flex-1 overflow-auto min-h-0 bg-background">
         {/* Sticky header */}
         <div
-          className="flex items-center border-b bg-muted/30 py-2 text-[11px] font-medium text-muted-foreground uppercase tracking-wider sticky top-0 z-10 backdrop-blur-sm bg-background/95"
+          className="flex items-center border-b border-border py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide sticky top-0 z-10 backdrop-blur bg-card/95 supports-[backdrop-filter]:bg-card/80"
           style={{ minWidth: `${TOTAL_W}px` }}
         >
           {COLUMNS.map((col) => (
@@ -646,7 +657,7 @@ export default function LeadsPage() {
                 sort.dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
               )}
               {col.sortable && sort.field !== col.sortField && col.label && (
-                <ArrowUpDown className="h-3 w-3 opacity-30" />
+                <ArrowUpDown className="h-3 w-3 opacity-40" />
               )}
             </div>
           ))}
@@ -704,6 +715,7 @@ export default function LeadsPage() {
                 || (p.sourceDate as string)
                 || (p.createdAt as string);
 
+              const stepReplied = (p.stepReplied as string) || "";
               return (
                 <div
                   key={p.id as string}
@@ -717,14 +729,14 @@ export default function LeadsPage() {
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
                   className={cn(
-                    "flex items-center border-b text-sm transition-colors cursor-pointer",
-                    "hover:bg-muted/50",
-                    thread && (thread as Record<string, unknown>).isUnread ? "bg-primary/[0.02]" : ""
+                    "flex items-center border-b border-border/60 text-sm transition-colors cursor-pointer text-foreground/90",
+                    "hover:bg-accent/40",
+                    thread && (thread as Record<string, unknown>).isUnread ? "bg-primary/[0.04]" : ""
                   )}
                   onClick={() => openReplyPopup(p)}
                 >
                   {/* Date */}
-                  <div className="shrink-0 px-3 text-xs text-muted-foreground" style={{ width: `${COLUMNS[0].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs text-muted-foreground tabular-nums" style={{ width: `${COLUMNS[0].w}px` }}>
                     <span title={formatFullDateTime(displayDate)}>{formatDate(displayDate)}</span>
                   </div>
 
@@ -749,7 +761,7 @@ export default function LeadsPage() {
                   </div>
 
                   {/* Phone */}
-                  <div className="shrink-0 px-3 text-xs" style={{ width: `${COLUMNS[5].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs tabular-nums" style={{ width: `${COLUMNS[5].w}px` }}>
                     <CopyCell value={(p.phone as string) || "-"} />
                   </div>
 
@@ -783,8 +795,14 @@ export default function LeadsPage() {
                   </div>
 
                   {/* Step Replied */}
-                  <div className="shrink-0 px-3 text-xs text-muted-foreground" style={{ width: `${COLUMNS[11].w}px` }}>
-                    {(p.stepReplied as string) || "-"}
+                  <div
+                    className={cn(
+                      "shrink-0 px-3 text-xs tabular-nums",
+                      stepReplied ? "text-muted-foreground" : "text-muted-foreground/60"
+                    )}
+                    style={{ width: `${COLUMNS[11].w}px` }}
+                  >
+                    {stepReplied || "-"}
                   </div>
 
                   {/* Notes */}
@@ -834,7 +852,7 @@ export default function LeadsPage() {
 
           {/* Prospect info bar */}
           {replyProspect && (
-            <div className="flex items-center gap-4 text-xs text-muted-foreground border-b pb-3">
+            <div className="flex items-center gap-4 text-xs text-muted-foreground border-b border-border pb-3">
               {replyProspect.company ? (
                 <span>{String(replyProspect.company)}</span>
               ) : null}
@@ -871,7 +889,7 @@ export default function LeadsPage() {
                       "rounded-lg border p-4",
                       isInbound
                         ? "bg-primary/5 border-primary/20"
-                        : "bg-muted/30"
+                        : "bg-muted/40 border-border"
                     )}
                   >
                     <div className="flex items-center justify-between mb-2">
@@ -880,7 +898,9 @@ export default function LeadsPage() {
                           variant="outline"
                           className={cn(
                             "text-[10px]",
-                            isInbound ? "text-primary border-primary/30" : "text-muted-foreground"
+                            isInbound
+                              ? "text-primary border-primary/30"
+                              : "text-muted-foreground border-border"
                           )}
                         >
                           {isInbound ? "Reply" : "Sent"}
@@ -889,14 +909,14 @@ export default function LeadsPage() {
                           {from}
                         </span>
                       </div>
-                      <span className="text-[10px] text-muted-foreground shrink-0">
+                      <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
                         {sentAt ? formatFullDateTime(sentAt) : ""}
                       </span>
                     </div>
                     {subject && (
-                      <p className="text-xs font-medium mb-1.5">{subject}</p>
+                      <p className="text-xs font-medium mb-1.5 text-foreground">{subject}</p>
                     )}
-                    <div className="text-sm whitespace-pre-wrap leading-relaxed">
+                    <div className="text-sm whitespace-pre-wrap leading-relaxed text-foreground/90">
                       {body || <span className="text-muted-foreground italic">No content</span>}
                     </div>
                   </div>
@@ -907,14 +927,14 @@ export default function LeadsPage() {
 
           {/* Footer with View in Inbox button */}
           {replyProspect && !!(replyProspect.thread as Record<string, unknown>)?.id && (
-            <div className="border-t pt-3 flex justify-end">
+            <div className="border-t border-border pt-3 flex justify-end">
               <button
                 onClick={() => {
                   const threadId = (replyProspect.thread as Record<string, unknown>).id as string;
                   setReplyProspect(null);
                   openThread(threadId);
                 }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors focus:outline-none focus:ring-2 focus:ring-ring/40"
               >
                 <Mail className="h-3.5 w-3.5" />
                 View in Inbox

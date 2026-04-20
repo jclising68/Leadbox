@@ -79,8 +79,8 @@ function NavLink({
         "flex items-center gap-3 rounded-md transition-colors",
         collapsed ? "justify-center w-9 h-9" : "px-3 h-9",
         active
-          ? "bg-primary/10 text-primary font-medium"
-          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+          : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       )}
     >
       <item.icon className="h-4 w-4 shrink-0" />
@@ -98,7 +98,7 @@ function ThemeToggle({ collapsed }: { collapsed: boolean }) {
       title={collapsed ? (isDark ? "Light mode" : "Dark mode") : undefined}
       onClick={() => setTheme(isDark ? "light" : "dark")}
       className={cn(
-        "flex items-center gap-3 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors",
+        "flex items-center gap-3 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors",
         collapsed ? "justify-center w-9 h-9" : "px-3 h-9"
       )}
     >
@@ -126,7 +126,7 @@ export function AppSidebar() {
   return (
     <div
       className={cn(
-        "border-r bg-muted/30 flex flex-col h-full transition-all duration-200 overflow-hidden",
+        "border-r border-sidebar-border bg-sidebar text-sidebar-foreground flex flex-col h-full transition-all duration-200 overflow-hidden",
         collapsed ? "w-14" : "w-48"
       )}
     >
@@ -218,7 +218,7 @@ export function AppSidebar() {
           title={collapsed ? "Logout" : undefined}
           onClick={() => signOut({ callbackUrl: "/login" })}
           className={cn(
-            "flex items-center gap-3 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors",
+            "flex items-center gap-3 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors",
             collapsed ? "justify-center w-9 h-9" : "px-3 h-9"
           )}
         >

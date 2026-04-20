@@ -73,12 +73,11 @@ function ProviderBadge({ provider }: { provider?: string | null }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium",
+        "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ring-1 ring-inset",
         isInstantly
-          ? "bg-blue-500/10 text-blue-500"
-          : "text-[#00BFA6]"
+          ? "bg-blue-500/10 text-blue-600 dark:text-blue-300 ring-blue-500/25"
+          : "bg-teal-500/10 text-teal-600 dark:text-teal-300 ring-teal-500/25"
       )}
-      style={!isInstantly ? { backgroundColor: "rgba(0,191,166,0.1)" } : undefined}
     >
       {isInstantly ? (
         <Zap className="h-2.5 w-2.5" />
@@ -153,9 +152,9 @@ export function ThreadDetail() {
   return (
     <div className="flex-1 flex h-full overflow-hidden">
       {/* Message area - center */}
-      <div className="flex-1 flex flex-col min-w-0 h-full">
+      <div className="flex-1 flex flex-col min-w-0 h-full bg-background">
         {/* Toolbar */}
-        <div className="px-4 py-2 border-b flex items-center justify-between shrink-0">
+        <div className="px-4 py-2 border-b border-border flex items-center justify-between shrink-0 bg-card/40">
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setSelectedThread(null)}>
               <X className="h-4 w-4" />
@@ -305,7 +304,7 @@ export function ThreadDetail() {
         </div>
 
         {/* Sender info bar */}
-        <div className="px-6 py-2.5 border-b flex items-center justify-between shrink-0">
+        <div className="px-6 py-2.5 border-b border-border flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted-foreground">
               {thread.messages?.[0]?.fromEmail || thread.prospect.email || ""}
@@ -359,14 +358,14 @@ export function ThreadDetail() {
                     )}
                   >
                     {msg.direction === "INBOUND" ? (
-                      <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0">
-                        <span className="text-xs font-medium text-blue-500">
+                      <div className="w-8 h-8 rounded-full bg-muted ring-1 ring-inset ring-border flex items-center justify-center shrink-0">
+                        <span className="text-xs font-semibold text-foreground/80">
                           {(thread.prospect.firstName?.[0] || thread.prospect.email?.[0] || "?").toUpperCase()}
                         </span>
                       </div>
                     ) : (
-                      <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
-                        <span className="text-xs font-medium text-primary">You</span>
+                      <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center shrink-0">
+                        <span className="text-[10px] font-semibold">You</span>
                       </div>
                     )}
                     <div className={cn("min-w-0", msg.direction === "INBOUND" ? "text-left" : "text-right")}>
@@ -395,15 +394,15 @@ export function ThreadDetail() {
                     </span>
                   </div>
 
-                  {/* Bubble: prospect = blue-tinted on the left; us = primary
-                      tint on the right. Caps at 80% width so long messages
-                      wrap instead of spanning the whole pane. */}
+                  {/* Bubble: prospect messages sit on a neutral surface; our
+                      replies use the primary fill. Caps at 80% width so long
+                      messages wrap instead of spanning the whole pane. */}
                   <div
                     className={cn(
-                      "rounded-2xl px-4 py-3 text-sm leading-relaxed max-w-[80%]",
+                      "rounded-2xl px-4 py-3 text-sm leading-relaxed max-w-[80%] ring-1 ring-inset",
                       msg.direction === "INBOUND"
-                        ? "bg-blue-500/10 rounded-tl-sm ml-11"
-                        : "bg-primary/10 rounded-tr-sm mr-11"
+                        ? "bg-card ring-border rounded-tl-sm ml-11 text-foreground"
+                        : "bg-primary text-primary-foreground ring-primary/0 rounded-tr-sm mr-11"
                     )}
                   >
                     <div className="whitespace-pre-wrap break-words">
@@ -436,9 +435,9 @@ export function ThreadDetail() {
         </div>
 
         {/* Reply composer */}
-        <div className="border-t px-4 py-3 shrink-0">
+        <div className="border-t border-border bg-card/40 px-4 py-3 shrink-0">
           <textarea
-            className="w-full rounded-lg border bg-muted/30 px-3 py-2 text-sm min-h-[60px] max-h-[160px] resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground"
+            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm min-h-[60px] max-h-[160px] resize-none focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring/60 placeholder:text-muted-foreground transition-colors"
             placeholder={thread?.channel === "LINKEDIN" ? "Type your LinkedIn message..." : "Type your reply..."}
             value={replyText}
             onChange={(e) => setReplyText(e.target.value)}
@@ -493,8 +492,8 @@ export function ThreadDetail() {
       </div>
 
       {/* Prospect details panel */}
-      <div className="w-72 border-l bg-muted/10 flex flex-col h-full overflow-hidden shrink-0">
-        <div className="px-4 py-3 border-b flex items-center justify-between shrink-0">
+      <div className="w-72 border-l border-border bg-card flex flex-col h-full overflow-hidden shrink-0">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between shrink-0">
           <h3 className="text-sm font-semibold">Prospect details</h3>
           <button
             type="button"
@@ -511,8 +510,8 @@ export function ThreadDetail() {
           <div className="px-4 py-4">
             {/* Prospect card */}
             <div className="flex items-start gap-3 mb-3">
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                <User className="h-5 w-5 text-primary" />
+              <div className="w-10 h-10 rounded-full bg-muted ring-1 ring-inset ring-border flex items-center justify-center shrink-0">
+                <User className="h-5 w-5 text-muted-foreground" />
               </div>
               <div className="min-w-0">
                 <h4 className="text-sm font-semibold truncate">{prospectName}</h4>

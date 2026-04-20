@@ -2,7 +2,6 @@
 
 import { useLabels } from "@/hooks/use-labels";
 import { useInboxStore } from "@/stores/inbox-store";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Search, Plus, X } from "lucide-react";
 import { SidebarToggle } from "../../../../components/app-sidebar";
@@ -15,10 +14,10 @@ export function LabelTabs() {
   const [showSearch, setShowSearch] = useState(false);
 
   return (
-    <div className="border-b bg-background">
+    <div className="border-b border-border bg-background">
       {/* Search bar */}
       {showSearch && (
-        <div className="px-4 py-2 border-b flex items-center gap-2">
+        <div className="px-4 py-2 border-b border-border flex items-center gap-2">
           <Search className="h-4 w-4 text-muted-foreground shrink-0" />
           <input
             value={searchQuery}
@@ -45,7 +44,7 @@ export function LabelTabs() {
       )}
 
       {/* Label tabs */}
-      <div className="flex items-center gap-0.5 px-2 py-1 overflow-x-auto">
+      <div className="flex items-center gap-0.5 px-2 py-1.5 overflow-x-auto">
         {/* Sidebar toggle */}
         <SidebarToggle />
 
@@ -55,8 +54,8 @@ export function LabelTabs() {
           className={cn(
             "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm whitespace-nowrap transition-colors shrink-0",
             !selectedLabelId
-              ? "bg-muted font-medium"
-              : "hover:bg-muted/50 text-muted-foreground"
+              ? "bg-accent text-accent-foreground font-medium"
+              : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
           )}
         >
           All messages
@@ -69,34 +68,48 @@ export function LabelTabs() {
             name: string;
             color: string;
             _count: { threadLabels: number };
-          }) => (
-            <button
-              key={label.id}
-              onClick={() =>
-                setSelectedLabel(selectedLabelId === label.id ? null : label.id)
-              }
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm whitespace-nowrap transition-colors shrink-0",
-                selectedLabelId === label.id
-                  ? "bg-muted font-medium"
-                  : "hover:bg-muted/50 text-muted-foreground"
-              )}
-            >
-              {label.name}
-              {label._count.threadLabels > 0 && (
-                <Badge
-                  className="h-[18px] px-1.5 text-[10px] font-medium"
-                  style={{ backgroundColor: label.color, color: "white" }}
-                >
-                  {label._count.threadLabels > 99 ? "99+" : label._count.threadLabels}
-                  {" new"}
-                </Badge>
-              )}
-            </button>
-          )
+          }) => {
+            const active = selectedLabelId === label.id;
+            return (
+              <button
+                key={label.id}
+                onClick={() =>
+                  setSelectedLabel(active ? null : label.id)
+                }
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm whitespace-nowrap transition-colors shrink-0",
+                  active
+                    ? "bg-accent text-accent-foreground font-medium"
+                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                )}
+              >
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ backgroundColor: label.color }}
+                  aria-hidden
+                />
+                {label.name}
+                {label._count.threadLabels > 0 && (
+                  <span
+                    className="h-[18px] px-1.5 inline-flex items-center rounded-full text-[10px] font-semibold tabular-nums"
+                    style={{
+                      backgroundColor: `${label.color}22`,
+                      color: label.color,
+                      boxShadow: `inset 0 0 0 1px ${label.color}40`,
+                    }}
+                  >
+                    {label._count.threadLabels > 99 ? "99+" : label._count.threadLabels}
+                  </span>
+                )}
+              </button>
+            );
+          }
         )}
 
-        <button className="p-1.5 text-muted-foreground hover:text-foreground shrink-0">
+        <button
+          className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 rounded-md shrink-0 transition-colors"
+          title="Create label"
+        >
           <Plus className="h-4 w-4" />
         </button>
 
@@ -105,7 +118,8 @@ export function LabelTabs() {
         {!showSearch && (
           <button
             onClick={() => setShowSearch(true)}
-            className="p-1.5 text-muted-foreground hover:text-foreground shrink-0"
+            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent/60 rounded-md shrink-0 transition-colors"
+            title="Search conversations"
           >
             <Search className="h-4 w-4" />
           </button>

@@ -50,13 +50,6 @@ export async function DELETE(
     return NextResponse.json({ error: "Label not found" }, { status: 404 });
   }
 
-  if (label.isSystem) {
-    return NextResponse.json(
-      { error: "Cannot delete system labels" },
-      { status: 400 }
-    );
-  }
-
   await prisma.label.delete({ where: { id } });
   return NextResponse.json({ success: true });
 }

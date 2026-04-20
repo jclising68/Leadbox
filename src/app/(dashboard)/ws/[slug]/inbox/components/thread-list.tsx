@@ -3,7 +3,6 @@
 import { useThreads } from "@/hooks/use-threads";
 import { useInboxStore } from "@/stores/inbox-store";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Mail, Link2, Loader2, Filter, X, SlidersHorizontal, Zap, Send, RefreshCw, Search, ArrowDownNarrowWide, ArrowUpNarrowWide } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -120,9 +119,9 @@ export function ThreadList() {
   const viewTitle = view === "ARCHIVED" ? "Archive" : view === "SPAM" ? "Spam" : view === "TRASH" ? "Trash" : "All messages";
 
   return (
-    <div className="w-80 border-r flex flex-col h-full bg-muted/10">
+    <div className="w-80 border-r border-border bg-card flex flex-col h-full">
       {/* Header with search + filters */}
-      <div className="px-3 py-2 border-b space-y-2">
+      <div className="px-3 py-2 border-b border-border space-y-2">
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <input
@@ -130,7 +129,7 @@ export function ThreadList() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search name, email, message…"
-            className="w-full pl-7 pr-7 py-1.5 text-xs rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+            className="w-full pl-7 pr-7 py-1.5 text-xs rounded-md border border-input bg-background/60 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring/60 transition-colors"
           />
           {searchQuery && (
             <button
@@ -379,20 +378,25 @@ export function ThreadList() {
                   <button
                     onClick={() => setSelectedThread(thread.id)}
                     className={cn(
-                      "w-full text-left px-3 py-2 border-b transition-colors h-full",
+                      "w-full text-left px-3 py-2.5 border-b border-border/60 transition-colors h-full relative",
                       selectedThreadId === thread.id
-                        ? "bg-muted"
-                        : "hover:bg-muted/50",
-                      thread.isUnread && selectedThreadId !== thread.id && "bg-primary/[0.03]"
+                        ? "bg-accent"
+                        : "hover:bg-accent/60"
                     )}
                   >
+                    {thread.isUnread && (
+                      <span
+                        className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r-full bg-primary"
+                        aria-hidden
+                      />
+                    )}
                     <div className="flex items-start gap-2.5">
                       <div
                         className={cn(
-                          "w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-medium shrink-0 mt-0.5",
+                          "w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0 mt-0.5 ring-1 ring-inset",
                           thread.isUnread
-                            ? "bg-primary/10 text-primary"
-                            : "bg-muted text-muted-foreground"
+                            ? "bg-primary/10 text-primary ring-primary/20"
+                            : "bg-muted text-muted-foreground ring-border"
                         )}
                       >
                         {getInitials(thread.prospect.firstName, thread.prospect.lastName, thread.prospect.email)}
@@ -400,51 +404,56 @@ export function ThreadList() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5 min-w-0">
-                            <span className={cn("text-sm truncate", thread.isUnread && "font-semibold")}>
+                            <span
+                              className={cn(
+                                "text-sm truncate",
+                                thread.isUnread
+                                  ? "font-semibold text-foreground"
+                                  : "text-foreground/90"
+                              )}
+                            >
                               {name}
                             </span>
-                            {/* Provider icon */}
                             {thread.channel === "LINKEDIN" ? (
-                              <span className="shrink-0 w-3.5 h-3.5 rounded-sm flex items-center justify-center" style={{ backgroundColor: "rgba(0,191,166,0.2)" }}>
-                                <Send className="h-2 w-2" style={{ color: "#00BFA6" }} />
+                              <span className="shrink-0 w-3.5 h-3.5 rounded-sm flex items-center justify-center bg-teal-500/15 ring-1 ring-inset ring-teal-500/20">
+                                <Send className="h-2 w-2 text-teal-600 dark:text-teal-300" />
                               </span>
                             ) : (
-                              <span className="shrink-0 w-3.5 h-3.5 rounded-sm flex items-center justify-center bg-blue-500/15">
-                                <Zap className="h-2 w-2 text-blue-500" />
+                              <span className="shrink-0 w-3.5 h-3.5 rounded-sm flex items-center justify-center bg-blue-500/15 ring-1 ring-inset ring-blue-500/25">
+                                <Zap className="h-2 w-2 text-blue-600 dark:text-blue-300" />
                               </span>
                             )}
                           </div>
                           <span
-                            className="text-[11px] text-muted-foreground shrink-0"
+                            className="text-[11px] text-muted-foreground shrink-0 tabular-nums"
                             title={thread.lastMessageAt ? new Date(thread.lastMessageAt).toLocaleString() : ""}
                           >
                             {thread.lastMessageAt ? formatDate(thread.lastMessageAt) : ""}
                           </span>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1 flex items-center gap-1">
-                          {thread.channel === "LINKEDIN" ? (
-                            <Link2 className="h-3 w-3 text-blue-500 shrink-0 inline" />
-                          ) : (
-                            <Mail className="h-3 w-3 text-muted-foreground/50 shrink-0 inline" />
-                          )}
+                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
                           <span className="truncate">{thread.snippet || "No preview"}</span>
                         </p>
-                        {thread.threadLabels?.length > 0 && (
-                          <div className="flex gap-1 mt-1 flex-wrap">
-                            {thread.threadLabels.slice(0, 3).map(
+                        {(thread.threadLabels?.length > 0 || thread.prospect.company) && (
+                          <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                            {thread.threadLabels?.slice(0, 3).map(
                               (tl: { id: string; label: { name: string; color: string } }) => (
-                                <Badge
+                                <span
                                   key={tl.id}
-                                  className="text-[9px] px-1 py-0 h-[16px] font-normal"
-                                  style={{ backgroundColor: tl.label.color, color: "white" }}
+                                  className="text-[10px] px-1.5 py-0 h-[16px] inline-flex items-center rounded font-medium"
+                                  style={{
+                                    backgroundColor: `${tl.label.color}22`,
+                                    color: tl.label.color,
+                                    boxShadow: `inset 0 0 0 1px ${tl.label.color}40`,
+                                  }}
                                 >
                                   {tl.label.name}
-                                </Badge>
+                                </span>
                               )
                             )}
                             {thread.prospect.company && (
-                              <span className="text-[10px] text-muted-foreground ml-0.5">
-                                {thread.prospect.company}
+                              <span className="text-[11px] text-muted-foreground/80 truncate">
+                                · {thread.prospect.company}
                               </span>
                             )}
                           </div>
