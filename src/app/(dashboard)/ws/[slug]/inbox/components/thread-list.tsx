@@ -102,6 +102,19 @@ export function ThreadList() {
     }
   }, [virtualItems, threads.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
+  // Auto-scroll to the selected thread when the list loads (e.g. navigating
+  // from the leads page). Only fires once per selectedThreadId change.
+  const scrolledToRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedThreadId || selectedThreadId === scrolledToRef.current) return;
+    if (threads.length === 0) return;
+    const idx = threads.findIndex((t: { id: string }) => t.id === selectedThreadId);
+    if (idx >= 0) {
+      rowVirtualizer.scrollToIndex(idx, { align: "start" });
+      scrolledToRef.current = selectedThreadId;
+    }
+  }, [selectedThreadId, threads, rowVirtualizer]);
+
   const hasActiveFilters = !!filterChannel || filterUnread || filterHasReply || !!filterDateFrom || !!filterDateTo;
 
   const viewTitle = view === "ARCHIVED" ? "Archive" : view === "SPAM" ? "Spam" : view === "TRASH" ? "Trash" : "All messages";

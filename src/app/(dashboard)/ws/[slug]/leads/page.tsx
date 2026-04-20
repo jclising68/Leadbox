@@ -362,7 +362,7 @@ export default function LeadsPage() {
   const [dateTo, setDateTo] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const router = useRouter();
-  const { setSelectedThread } = useInboxStore();
+  const { setSelectedThread, setView, setSelectedLabel, clearFilters: clearInboxFilters } = useInboxStore();
   const { data: labels } = useLabels();
 
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useProspects({
@@ -412,10 +412,15 @@ export default function LeadsPage() {
 
   const openThread = useCallback((threadId: string | null) => {
     if (threadId) {
+      // Set view to ALL and clear inbox filters so the thread is visible
+      // regardless of its status or labels.
+      setView("ALL");
+      setSelectedLabel(null);
+      clearInboxFilters();
       setSelectedThread(threadId);
       router.push(`/ws/${slug}/inbox`);
     }
-  }, [setSelectedThread, router, slug]);
+  }, [setSelectedThread, setView, setSelectedLabel, clearInboxFilters, router, slug]);
 
   const hasFilters = !!labelFilter || !!channelFilter || !!dateFrom || !!dateTo || !!statusFilter;
 
