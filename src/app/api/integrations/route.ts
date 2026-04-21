@@ -30,24 +30,48 @@ export async function GET(req: NextRequest) {
     orderBy: { createdAt: "desc" },
   });
 
-  // Get message stats per integration
-  const stats = await prisma.message.groupBy({
-    by: ["integrationId"],
-    where: {
-      integrationId: { in: integrations.map((i) => i.id) },
-    },
-    _count: true,
-    _max: { sentAt: true },
-  });
+  // Get message stats per integration (total + last-30-days to surface
+  // whether sync is actually pulling in fresh data).
+  const integrationIds = integrations.map((i) => i.id);
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  const statsMap = new Map(
-    stats.map((s) => [s.integrationId, { totalMessages: s._count, lastActivityAt: s._max.sentAt }])
+  const [totalStats, recentStats] = await Promise.all([
+    prisma.message.groupBy({
+      by: ["integrationId"],
+      where: { integrationId: { in: integrationIds } },
+      _count: true,
+      _max: { sentAt: true },
+    }),
+    prisma.message.groupBy({
+      by: ["integrationId"],
+      where: {
+        integrationId: { in: integrationIds },
+        sentAt: { gte: thirtyDaysAgo },
+      },
+      _count: true,
+    }),
+  ]);
+
+  const totalMap = new Map(
+    totalStats.map((s) => [s.integrationId, { totalMessages: s._count, lastActivityAt: s._max.sentAt }])
+  );
+  const recentMap = new Map(
+    recentStats.map((s) => [s.integrationId, s._count])
   );
 
-  // Mask API keys and add stats to response
+  // Stale-sync threshold: ~matches sync-all's STALE_LOCK_MS.
+  const STALE_LOCK_MS = 6 * 60 * 1000;
+  const now = Date.now();
+
   const masked = integrations.map((i) => {
-    const iStats = statsMap.get(i.id);
+    const iStats = totalMap.get(i.id);
     const config = (i.config as Record<string, unknown>) ?? {};
+    const syncStartedAt = config.syncStartedAt as string | undefined;
+    const syncStuck =
+      !!config.syncRunning &&
+      !!syncStartedAt &&
+      now - new Date(syncStartedAt).getTime() > STALE_LOCK_MS;
+
     return {
       ...i,
       apiKeyEncrypted: undefined,
@@ -59,9 +83,14 @@ export async function GET(req: NextRequest) {
       ),
       webhookUrl: `${appUrl}/api/webhooks/${i.provider.toLowerCase()}?workspace_id=${workspaceId}&secret=${i.webhookSecret}`,
       totalMessages: iStats?.totalMessages ?? 0,
+      messagesLast30Days: recentMap.get(i.id) ?? 0,
       lastActivityAt: iStats?.lastActivityAt ?? null,
       syncing: !!config.syncRunning,
+      syncStartedAt: syncStartedAt ?? null,
+      syncStuck,
       enriching: !!config.enrichRunning,
+      lastError: (config.lastError as string | undefined) ?? null,
+      lastErrorAt: (config.lastErrorAt as string | undefined) ?? null,
     };
   });
 

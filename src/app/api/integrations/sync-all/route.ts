@@ -21,20 +21,41 @@ const STALE_LOCK_MS = 6 * 60 * 1000; // 6 minutes
  * Idempotent + cheap: returns immediately, work runs via `after()`.
  * Skips integrations that are currently syncing OR were synced very recently.
  */
+type SyncResult = {
+  integrationId: string;
+  provider: string;
+  status: "triggered" | "skipped_running" | "skipped_fresh" | "skipped_inactive";
+  lastSyncAt: string | null;
+  lastError?: string | null;
+};
+
 export async function POST(req: NextRequest) {
   const { error, workspaceId } = await requireWorkspaceAccess(req);
   if (error) return error;
 
+  // Include inactive integrations so the UI can show why they didn't sync
+  // (otherwise Stable Sea's broken integration was invisible).
   const integrations = await prisma.integration.findMany({
-    where: { workspaceId: workspaceId!, isActive: true },
-    select: { id: true, provider: true, lastSyncAt: true, config: true },
+    where: { workspaceId: workspaceId! },
+    select: { id: true, provider: true, lastSyncAt: true, isActive: true, config: true },
   });
 
-  const triggered: string[] = [];
-  const skipped: string[] = [];
+  const results: SyncResult[] = [];
 
   for (const integration of integrations) {
     const config = (integration.config as Record<string, unknown>) ?? {};
+    const lastError = (config.lastError as string | undefined) ?? null;
+
+    if (!integration.isActive) {
+      results.push({
+        integrationId: integration.id,
+        provider: integration.provider,
+        status: "skipped_inactive",
+        lastSyncAt: integration.lastSyncAt?.toISOString() ?? null,
+        lastError,
+      });
+      continue;
+    }
 
     // Already syncing — skip, but recover stale locks (function killed
     // mid-run on Vercel without running `finally`).
@@ -42,7 +63,13 @@ export async function POST(req: NextRequest) {
       const startedAt = config.syncStartedAt as string | undefined;
       const elapsed = startedAt ? Date.now() - new Date(startedAt).getTime() : Infinity;
       if (elapsed < STALE_LOCK_MS) {
-        skipped.push(integration.id);
+        results.push({
+          integrationId: integration.id,
+          provider: integration.provider,
+          status: "skipped_running",
+          lastSyncAt: integration.lastSyncAt?.toISOString() ?? null,
+          lastError,
+        });
         continue;
       }
       // Stale — fall through to re-trigger after clearing
@@ -55,11 +82,23 @@ export async function POST(req: NextRequest) {
       integration.lastSyncAt &&
       Date.now() - new Date(integration.lastSyncAt).getTime() < FRESH_WINDOW_MS
     ) {
-      skipped.push(integration.id);
+      results.push({
+        integrationId: integration.id,
+        provider: integration.provider,
+        status: "skipped_fresh",
+        lastSyncAt: integration.lastSyncAt?.toISOString() ?? null,
+        lastError,
+      });
       continue;
     }
 
-    triggered.push(integration.id);
+    results.push({
+      integrationId: integration.id,
+      provider: integration.provider,
+      status: "triggered",
+      lastSyncAt: integration.lastSyncAt?.toISOString() ?? null,
+      lastError,
+    });
 
     // Mark running BEFORE the after() call so a quick refresh doesn't
     // double-trigger.
@@ -76,6 +115,7 @@ export async function POST(req: NextRequest) {
 
     after(async () => {
       const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
+      let syncError: string | null = null;
       try {
         const result = await syncFn(integration.id);
         console.log(
@@ -91,6 +131,7 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (err) {
+        syncError = err instanceof Error ? err.message : String(err);
         console.error(`[sync-all] sync failed for ${integration.id}:`, err);
       } finally {
         const fresh = await prisma.integration.findUnique({
@@ -100,6 +141,15 @@ export async function POST(req: NextRequest) {
         const c = ((fresh?.config as Record<string, unknown>) ?? {});
         delete c.syncRunning;
         delete c.syncStartedAt;
+        // Persist last error (or clear it on success) so future /status
+        // calls and the UI can see why a workspace stopped syncing.
+        if (syncError) {
+          c.lastError = syncError;
+          c.lastErrorAt = new Date().toISOString();
+        } else {
+          delete c.lastError;
+          delete c.lastErrorAt;
+        }
         await prisma.integration.update({
           where: { id: integration.id },
           data: { config: c as object, lastSyncAt: new Date() },
@@ -108,9 +158,13 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  const triggered = results.filter((r) => r.status === "triggered").length;
+  const skipped = results.length - triggered;
+
   return NextResponse.json({
-    triggered: triggered.length,
-    skipped: skipped.length,
-    total: integrations.length,
+    triggered,
+    skipped,
+    total: results.length,
+    results,
   });
 }

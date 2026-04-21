@@ -34,7 +34,7 @@ async function isSyncRunning(integrationId: string): Promise<boolean> {
   return true;
 }
 
-async function markSyncRunning(integrationId: string, running: boolean) {
+async function markSyncRunning(integrationId: string, running: boolean, errorMessage?: string | null) {
   const integration = await prisma.integration.findUnique({
     where: { id: integrationId },
     select: { config: true },
@@ -48,6 +48,15 @@ async function markSyncRunning(integrationId: string, running: boolean) {
   } else {
     delete config.syncRunning;
     delete config.syncStartedAt;
+    if (errorMessage !== undefined) {
+      if (errorMessage) {
+        config.lastError = errorMessage;
+        config.lastErrorAt = new Date().toISOString();
+      } else {
+        delete config.lastError;
+        delete config.lastErrorAt;
+      }
+    }
   }
 
   await prisma.integration.update({
@@ -86,6 +95,7 @@ export async function POST(
 
   after(async () => {
     const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
+    let syncError: string | null = null;
     try {
       const result = await syncFn(integration.id);
       console.log(`[sync] Completed for ${id}: ${result.synced} synced, ${result.skipped} skipped, ${result.errors} errors`);
@@ -118,9 +128,10 @@ export async function POST(
         console.error(`[sync] Auto-archive failed:`, err instanceof Error ? err.message : err);
       }
     } catch (err) {
-      console.error(`[sync] Failed for ${id}:`, err instanceof Error ? err.message : err);
+      syncError = err instanceof Error ? err.message : String(err);
+      console.error(`[sync] Failed for ${id}:`, syncError);
     } finally {
-      await markSyncRunning(id, false);
+      await markSyncRunning(id, false, syncError);
     }
   });
 

@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Copy, Plus, Check, Loader2, Plug, Trash2, RefreshCw, Database } from "lucide-react";
+import { Copy, Plus, Check, Loader2, Plug, Trash2, RefreshCw, Database, AlertTriangle, Power } from "lucide-react";
 
 function headers(wId: string) {
   return { "x-workspace-id": wId, "Content-Type": "application/json" };
@@ -115,6 +115,41 @@ export default function IntegrationsPage() {
     onSettled: (_d, _e, id) => {
       setSyncingIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
     },
+  });
+
+  const patchMutation = useMutation({
+    mutationFn: async ({ id, body }: { id: string; body: Record<string, unknown> }) => {
+      const res = await fetch(`/api/integrations/${id}`, {
+        method: "PATCH",
+        headers: headers(workspaceId!),
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update");
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["integrations"] });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/integrations/${id}`, {
+        method: "DELETE",
+        headers: headers(workspaceId!),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to delete");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["integrations"] });
+      toast.success("Integration removed");
+    },
+    onError: (err) => toast.error(err.message),
   });
 
   const enrichMutation = useMutation({
@@ -240,11 +275,15 @@ export default function IntegrationsPage() {
               lastSyncAt: string | null;
               lastActivityAt: string | null;
               totalMessages: number;
+              messagesLast30Days?: number;
               syncing: boolean;
+              syncStuck?: boolean;
               enriching: boolean;
               createdAt: string;
+              lastError?: string | null;
+              lastErrorAt?: string | null;
             }) => (
-              <Card key={int.id}>
+              <Card key={int.id} className={!int.isActive ? "opacity-70" : ""}>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -252,15 +291,31 @@ export default function IntegrationsPage() {
                       <Badge variant={int.isActive ? "default" : "secondary"}>
                         {int.provider}
                       </Badge>
+                      {!int.isActive && (
+                        <Badge variant="destructive">Inactive — not syncing</Badge>
+                      )}
+                      {int.syncStuck && (
+                        <Badge variant="destructive">Stuck sync</Badge>
+                      )}
                     </div>
                     <div className="flex gap-2">
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => syncMutation.mutate(int.id)}
-                        disabled={syncingIds.has(int.id) || int.syncing}
+                        onClick={() => patchMutation.mutate({ id: int.id, body: { isActive: !int.isActive } })}
+                        disabled={patchMutation.isPending}
+                        title={int.isActive ? "Disable sync for this integration" : "Re-enable sync"}
                       >
-                        {syncingIds.has(int.id) || int.syncing ? (
+                        <Power className="h-3 w-3 mr-1" />
+                        {int.isActive ? "Disable" : "Enable"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => syncMutation.mutate(int.id)}
+                        disabled={syncingIds.has(int.id) || (int.syncing && !int.syncStuck) || !int.isActive}
+                      >
+                        {syncingIds.has(int.id) || (int.syncing && !int.syncStuck) ? (
                           <Loader2 className="h-3 w-3 animate-spin mr-1" />
                         ) : (
                           <RefreshCw className="h-3 w-3 mr-1" />
@@ -271,7 +326,7 @@ export default function IntegrationsPage() {
                         variant="outline"
                         size="sm"
                         onClick={() => enrichMutation.mutate(int.id)}
-                        disabled={enrichingIds.has(int.id) || int.enriching}
+                        disabled={enrichingIds.has(int.id) || int.enriching || !int.isActive}
                       >
                         {enrichingIds.has(int.id) || int.enriching ? (
                           <Loader2 className="h-3 w-3 animate-spin mr-1" />
@@ -292,12 +347,28 @@ export default function IntegrationsPage() {
                           "Test"
                         )}
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (confirm(`Remove ${int.name}? Historical messages are kept.`)) {
+                            deleteMutation.mutate(int.id);
+                          }
+                        }}
+                        disabled={deleteMutation.isPending}
+                        title="Remove integration"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
                     </div>
                   </div>
                   <CardDescription>
                     API Key: {int.apiKeyMasked}
                     {int.totalMessages > 0 && (
                       <> &middot; {int.totalMessages.toLocaleString()} messages</>
+                    )}
+                    {typeof int.messagesLast30Days === "number" && (
+                      <> &middot; {int.messagesLast30Days.toLocaleString()} last 30 days</>
                     )}
                     {int.lastSyncAt && (
                       <> &middot; Last sync: {new Date(int.lastSyncAt).toLocaleString()}</>
@@ -306,6 +377,32 @@ export default function IntegrationsPage() {
                       <> &middot; Last activity: {new Date(int.lastActivityAt).toLocaleString()}</>
                     )}
                   </CardDescription>
+                  {int.lastError && (
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium">Last sync failed</div>
+                        <div className="truncate" title={int.lastError}>{int.lastError}</div>
+                      </div>
+                      <button
+                        onClick={() => patchMutation.mutate({ id: int.id, body: { clearError: true } })}
+                        className="text-[10px] underline shrink-0 hover:opacity-80"
+                      >
+                        dismiss
+                      </button>
+                    </div>
+                  )}
+                  {int.syncStuck && (
+                    <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+                      <span>Sync lock is older than 6 min — likely killed mid-run.</span>
+                      <button
+                        onClick={() => patchMutation.mutate({ id: int.id, body: { clearSyncLock: true } })}
+                        className="text-[11px] underline shrink-0 hover:opacity-80"
+                      >
+                        unstick
+                      </button>
+                    </div>
+                  )}
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">

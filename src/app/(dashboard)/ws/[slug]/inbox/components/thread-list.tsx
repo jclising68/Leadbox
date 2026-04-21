@@ -59,9 +59,28 @@ export function ThreadList() {
         method: "POST",
         headers: { "x-workspace-id": workspaceId, "Content-Type": "application/json" },
       });
-      const data = await res.json().catch(() => ({}));
-      if (data?.triggered > 0) {
+      const data: {
+        triggered?: number;
+        total?: number;
+        results?: { provider: string; status: string; lastError?: string | null }[];
+      } = await res.json().catch(() => ({}));
+
+      const results = data?.results ?? [];
+      const inactive = results.filter((r) => r.status === "skipped_inactive");
+      const withErrors = results.filter((r) => r.lastError);
+
+      if ((data?.total ?? 0) === 0) {
+        toast.warning("No integrations in this workspace. Add one in Settings.");
+      } else if (inactive.length > 0 && (data?.triggered ?? 0) === 0) {
+        const names = inactive.map((r) => r.provider).join(", ");
+        toast.warning(`${names} integration${inactive.length === 1 ? " is" : "s are"} inactive — re-enable in Settings.`);
+      } else if (withErrors.length > 0) {
+        const first = withErrors[0];
+        toast.error(`${first.provider} last sync failed: ${first.lastError?.slice(0, 120)}`);
+      } else if ((data?.triggered ?? 0) > 0) {
         toast.success(`Syncing ${data.triggered} integration${data.triggered === 1 ? "" : "s"}...`);
+      } else {
+        toast.info("Already up to date (synced within the last 2 min).");
       }
       // Refetch what's already in the DB right now; sync result will land
       // on the next 15s poll interval.
@@ -323,10 +342,38 @@ export function ThreadList() {
         ) : threads.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-muted-foreground px-4">
             <Mail className="h-8 w-8 mb-3 opacity-40" />
-            <p className="text-sm font-medium">No conversations yet</p>
-            <p className="text-xs mt-1 text-center">
-              Connect an integration to start receiving messages
-            </p>
+            {hasActiveFilters || searchQuery ? (
+              <>
+                <p className="text-sm font-medium">No messages match your filters</p>
+                <p className="text-xs mt-1 text-center">
+                  Try clearing filters or expanding the date range.
+                </p>
+                <button
+                  onClick={() => { clearFilters(); setSearchQuery(""); }}
+                  className="mt-3 px-2.5 py-1 rounded text-[11px] border border-border hover:bg-accent transition-colors"
+                >
+                  Clear filters
+                </button>
+              </>
+            ) : view === "ARCHIVED" ? (
+              <>
+                <p className="text-sm font-medium">Archive is empty</p>
+                <p className="text-xs mt-1 text-center">
+                  Older threads (before Jan 1, 2026) and archived conversations appear here.
+                </p>
+              </>
+            ) : view === "SPAM" ? (
+              <p className="text-sm font-medium">No spam</p>
+            ) : view === "TRASH" ? (
+              <p className="text-sm font-medium">Trash is empty</p>
+            ) : (
+              <>
+                <p className="text-sm font-medium">No conversations yet</p>
+                <p className="text-xs mt-1 text-center">
+                  Connect an integration to start receiving messages, or click the refresh icon above to sync now.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div

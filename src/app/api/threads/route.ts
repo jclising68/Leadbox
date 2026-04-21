@@ -41,21 +41,39 @@ export async function GET(req: NextRequest) {
     where.isUnread = true;
   }
 
-  if (dateFrom || dateTo) {
-    const range: { gte?: Date; lte?: Date } = {};
-    if (dateFrom) range.gte = new Date(dateFrom);
+  // Date range: match threads that have ANY message in the window, not just
+  // the most recent one. A thread with a Mar 27 reply + Apr 6 reply should
+  // appear when the user filters "March" — matching what they see in
+  // Instantly/HeyReach Unibox. Filtering on Thread.lastMessageAt would have
+  // hidden it because its *last* activity is April.
+  const messageDateRange: { gte?: Date; lte?: Date } | null =
+    dateFrom || dateTo ? {} : null;
+  if (messageDateRange) {
+    if (dateFrom) messageDateRange.gte = new Date(dateFrom);
     if (dateTo) {
-      // Make `dateTo` inclusive of the entire selected day.
       const end = new Date(dateTo);
       end.setHours(23, 59, 59, 999);
-      range.lte = end;
+      messageDateRange.lte = end;
     }
-    where.lastMessageAt = range;
   }
 
-  // Only show threads where the lead has replied (has INBOUND messages)
+  const messageConditions: Prisma.MessageWhereInput[] = [];
   if (hasReply === "true") {
-    where.messages = { some: { direction: "INBOUND" } };
+    messageConditions.push({ direction: "INBOUND" });
+  }
+  if (messageDateRange) {
+    // `sentAt` is the provider timestamp; fall back to `receivedAt` (ingest
+    // time) when sentAt is null, so messages without a provider timestamp
+    // still match filters.
+    messageConditions.push({
+      OR: [
+        { sentAt: messageDateRange },
+        { AND: [{ sentAt: null }, { receivedAt: messageDateRange }] },
+      ],
+    });
+  }
+  if (messageConditions.length > 0) {
+    where.messages = { some: { AND: messageConditions } };
   }
 
   if (search) {
