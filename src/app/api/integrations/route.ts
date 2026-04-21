@@ -7,7 +7,7 @@ import { v4 as uuid } from "uuid";
 import { syncInstantly, testInstantlyConnection } from "@/services/instantly-sync";
 import { syncHeyreach, testHeyreachConnection } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
-import type { SyncProgress } from "@/services/sync-progress";
+import { STALE_LOCK_MS, type SyncProgress } from "@/services/sync-progress";
 
 // Initial sync + enrichment can take a while for large accounts
 export const maxDuration = 300;
@@ -60,8 +60,6 @@ export async function GET(req: NextRequest) {
     recentStats.map((s) => [s.integrationId, s._count])
   );
 
-  // Stale-sync threshold: ~matches sync-all's STALE_LOCK_MS.
-  const STALE_LOCK_MS = 6 * 60 * 1000;
   const now = Date.now();
 
   const masked = integrations.map((i) => {

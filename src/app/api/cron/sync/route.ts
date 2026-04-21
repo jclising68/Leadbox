@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
+import { STALE_LOCK_MS } from "@/services/sync-progress";
 
 export const maxDuration = 300;
 
@@ -55,7 +56,7 @@ export async function GET(req: NextRequest) {
         if (config.syncRunning) {
           const startedAt = config.syncStartedAt as string | undefined;
           const elapsed = startedAt ? Date.now() - new Date(startedAt).getTime() : Infinity;
-          if (elapsed < 6 * 60 * 1000) {
+          if (elapsed < STALE_LOCK_MS) {
             console.log(`[cron] Skipping ${integration.id} — sync running (${Math.round(elapsed / 1000)}s)`);
             return { skipped: true };
           }

@@ -9,6 +9,23 @@ export type SyncProgress = {
   updatedAt: string; // ISO
 };
 
+// Treat sync locks older than this as stale. Sits just above Vercel's
+// 300s function timeout so legit long syncs aren't aborted, but short
+// enough that a killed `after()` heals quickly on the next trigger.
+export const STALE_LOCK_MS = 6 * 60 * 1000;
+
+// Mutates an integration.config object to mark a fresh sync attempt and
+// wipe leftover state from any prior run (errors + ghost progress beats).
+// Shared by the per-integration sync route and sync-all, which used to
+// inline identical copies and drift apart.
+export function markSyncStartedFresh(config: Record<string, unknown>) {
+  config.syncRunning = true;
+  config.syncStartedAt = new Date().toISOString();
+  delete config.lastError;
+  delete config.lastErrorAt;
+  delete config.syncProgress;
+}
+
 export async function updateSyncProgress(
   integrationId: string,
   progress: Omit<SyncProgress, "updatedAt"> & { updatedAt?: string },

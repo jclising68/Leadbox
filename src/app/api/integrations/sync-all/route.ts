@@ -4,15 +4,12 @@ import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
-import { updateSyncProgress } from "@/services/sync-progress";
+import { markSyncStartedFresh, STALE_LOCK_MS, updateSyncProgress } from "@/services/sync-progress";
 
 export const maxDuration = 300;
 
 // Skip a sync if the integration was synced this recently
 const FRESH_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
-// Treat sync locks older than this as stale (after() may have been killed).
-// Slightly above Vercel's 300s maxDuration so legit long syncs aren't aborted.
-const STALE_LOCK_MS = 6 * 60 * 1000; // 6 minutes
 
 /**
  * Trigger background sync for every active integration in the workspace.
@@ -102,15 +99,11 @@ export async function POST(req: NextRequest) {
     });
 
     // Mark running BEFORE the after() call so a quick refresh doesn't
-    // double-trigger. Also wipe leftover state so the UI shows a fresh
-    // "Queued..." instead of a ghost error or a frozen progress beat from
-    // an earlier after() that died.
+    // double-trigger. markSyncStartedFresh also wipes leftover error/
+    // progress state so the UI shows a clean "Queued..." instead of a
+    // ghost from an earlier after() that died.
     const freshConfig: Record<string, unknown> = { ...config };
-    freshConfig.syncRunning = true;
-    freshConfig.syncStartedAt = new Date().toISOString();
-    delete freshConfig.lastError;
-    delete freshConfig.lastErrorAt;
-    delete freshConfig.syncProgress;
+    markSyncStartedFresh(freshConfig);
     await prisma.integration.update({
       where: { id: integration.id },
       data: { config: freshConfig as object },

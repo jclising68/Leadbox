@@ -4,14 +4,16 @@ import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
-import { updateSyncProgress } from "@/services/sync-progress";
+import { markSyncStartedFresh, STALE_LOCK_MS, updateSyncProgress } from "@/services/sync-progress";
 import { after } from "next/server";
 import { workspaceJson } from "@/lib/api-response";
 
 // Allow up to 300s for the after() sync work (Vercel Pro max)
 export const maxDuration = 300;
 
-// Check if a sync is already running (DB-backed, serverless-safe)
+// Check if a sync is already running (DB-backed, serverless-safe).
+// Treats locks older than STALE_LOCK_MS as abandoned so a killed after()
+// (Vercel timeout, dev HMR) self-heals on the next trigger.
 async function isSyncRunning(integrationId: string): Promise<boolean> {
   const integration = await prisma.integration.findUnique({
     where: { id: integrationId },
@@ -21,15 +23,10 @@ async function isSyncRunning(integrationId: string): Promise<boolean> {
   const config = (integration?.config as Record<string, unknown>) ?? {};
   if (!config.syncRunning) return false;
 
-  // If sync started more than 2 minutes ago, consider it stale.
-  // On Vercel, after() background work can be killed at the 60s timeout
-  // without running finally blocks, so the flag may never be cleared.
-  // 2 minutes gives enough margin for legitimate syncs while recovering
-  // quickly from abandoned locks.
   const startedAt = config.syncStartedAt as string | undefined;
   if (startedAt) {
     const elapsed = Date.now() - new Date(startedAt).getTime();
-    if (elapsed > 6 * 60 * 1000) return false; // Stale — allow restart (>Vercel 300s maxDuration)
+    if (elapsed > STALE_LOCK_MS) return false;
   }
 
   return true;
@@ -44,14 +41,9 @@ async function markSyncRunning(integrationId: string, running: boolean, errorMes
   const config = ((integration?.config as Record<string, unknown>) ?? {});
 
   if (running) {
-    // Starting a fresh attempt — wipe leftover state from any prior run so
-    // the user sees a clean "Queued..." state instead of a ghost error or
-    // a frozen progress beat from a previous after() that died.
-    config.syncRunning = true;
-    config.syncStartedAt = new Date().toISOString();
-    delete config.lastError;
-    delete config.lastErrorAt;
-    delete config.syncProgress;
+    // Fresh attempt — wipes leftover error/progress from any prior run
+    // so the UI shows a clean "Queued..." instead of a ghost.
+    markSyncStartedFresh(config);
   } else {
     delete config.syncRunning;
     delete config.syncStartedAt;
@@ -177,13 +169,12 @@ export async function GET(
 
   const config = (integration.config as Record<string, unknown>) ?? {};
 
-  // Treat locks older than 6 minutes as stale (after() may have been killed).
-  // Slightly above Vercel's 300s maxDuration so legit long syncs aren't
-  // misreported as finished.
+  // Treat locks older than STALE_LOCK_MS as stale — a killed after() on
+  // Vercel never runs its finally so the flag would otherwise stick.
   let syncing = !!config.syncRunning;
   if (syncing && config.syncStartedAt) {
     const elapsed = Date.now() - new Date(config.syncStartedAt as string).getTime();
-    if (elapsed > 6 * 60 * 1000) syncing = false;
+    if (elapsed > STALE_LOCK_MS) syncing = false;
   }
 
   return workspaceJson({
