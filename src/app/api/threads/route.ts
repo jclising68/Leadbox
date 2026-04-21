@@ -33,10 +33,6 @@ export async function GET(req: NextRequest) {
     where.threadLabels = { some: { labelId } };
   }
 
-  if (channel) {
-    where.channel = channel as Prisma.EnumChannelFilter;
-  }
-
   if (isUnread === "true") {
     where.isUnread = true;
   }
@@ -58,6 +54,14 @@ export async function GET(req: NextRequest) {
   }
 
   const messageConditions: Prisma.MessageWhereInput[] = [];
+  // Filter at the *message* level, not `Thread.channel`. Thread.channel is
+  // captured once at thread creation and never updated, so a prospect first
+  // seen via HeyReach keeps channel=LINKEDIN forever — their later Instantly
+  // emails were invisible under the Email tab. Multi-channel threads now
+  // correctly appear under whichever channels they have activity on.
+  if (channel) {
+    messageConditions.push({ channel: channel as "EMAIL" | "LINKEDIN" });
+  }
   if (hasReply === "true") {
     messageConditions.push({ direction: "INBOUND" });
   }
