@@ -10,9 +10,22 @@ import { ThreadDetail } from "./components/thread-detail";
 export default function InboxPage() {
   const searchParams = useSearchParams();
   const status = searchParams.get("status");
-  const { setView, selectedThreadId } = useInboxStore();
+  const threadParam = searchParams.get("thread");
+  const { setView, setSelectedThread, clearFilters, selectedThreadId } = useInboxStore();
+
+  // When arriving from a notification or a cross-page link (`?thread=<id>`),
+  // open that thread in the detail pane. Clear filters so the thread isn't
+  // hidden behind a leftover "sam miller" search or date range from the
+  // previous session.
+  useEffect(() => {
+    if (!threadParam) return;
+    clearFilters();
+    setSelectedThread(threadParam);
+    setView("ALL");
+  }, [threadParam, clearFilters, setSelectedThread, setView]);
 
   useEffect(() => {
+    if (threadParam) return;
     if (status) {
       setView(status as "ARCHIVED" | "SPAM" | "TRASH");
     } else if (!selectedThreadId) {
@@ -20,7 +33,7 @@ export default function InboxPage() {
       // When a thread is pre-selected, keep the current view (set by the caller).
       setView("OPEN");
     }
-  }, [status, setView, selectedThreadId]);
+  }, [status, setView, selectedThreadId, threadParam]);
 
   return (
     <div className="flex flex-col h-full">

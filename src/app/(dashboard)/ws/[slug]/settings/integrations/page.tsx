@@ -410,10 +410,13 @@ export default function IntegrationsPage() {
                     <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
                       <span>Sync lock is older than 6 min — likely killed mid-run.</span>
                       <button
-                        onClick={() => patchMutation.mutate({ id: int.id, body: { clearSyncLock: true } })}
+                        onClick={async () => {
+                          await patchMutation.mutateAsync({ id: int.id, body: { clearSyncLock: true } });
+                          syncMutation.mutate(int.id);
+                        }}
                         className="text-[11px] underline shrink-0 hover:opacity-80"
                       >
-                        unstick
+                        unstick &amp; retry
                       </button>
                     </div>
                   )}

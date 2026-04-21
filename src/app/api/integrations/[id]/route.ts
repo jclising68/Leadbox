@@ -35,6 +35,9 @@ export async function PATCH(
     if (body.clearSyncLock) {
       delete config.syncRunning;
       delete config.syncStartedAt;
+      // Also clear any stale progress beat so the card shows a clean idle
+      // state instead of a ghost "Queued..." from the killed attempt.
+      delete config.syncProgress;
     }
     if (body.clearError) {
       delete config.lastError;

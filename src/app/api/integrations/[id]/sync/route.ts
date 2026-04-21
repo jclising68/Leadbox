@@ -44,8 +44,14 @@ async function markSyncRunning(integrationId: string, running: boolean, errorMes
   const config = ((integration?.config as Record<string, unknown>) ?? {});
 
   if (running) {
+    // Starting a fresh attempt — wipe leftover state from any prior run so
+    // the user sees a clean "Queued..." state instead of a ghost error or
+    // a frozen progress beat from a previous after() that died.
     config.syncRunning = true;
     config.syncStartedAt = new Date().toISOString();
+    delete config.lastError;
+    delete config.lastErrorAt;
+    delete config.syncProgress;
   } else {
     delete config.syncRunning;
     delete config.syncStartedAt;

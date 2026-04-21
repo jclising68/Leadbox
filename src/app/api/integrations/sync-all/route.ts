@@ -102,16 +102,18 @@ export async function POST(req: NextRequest) {
     });
 
     // Mark running BEFORE the after() call so a quick refresh doesn't
-    // double-trigger.
+    // double-trigger. Also wipe leftover state so the UI shows a fresh
+    // "Queued..." instead of a ghost error or a frozen progress beat from
+    // an earlier after() that died.
+    const freshConfig: Record<string, unknown> = { ...config };
+    freshConfig.syncRunning = true;
+    freshConfig.syncStartedAt = new Date().toISOString();
+    delete freshConfig.lastError;
+    delete freshConfig.lastErrorAt;
+    delete freshConfig.syncProgress;
     await prisma.integration.update({
       where: { id: integration.id },
-      data: {
-        config: {
-          ...config,
-          syncRunning: true,
-          syncStartedAt: new Date().toISOString(),
-        },
-      },
+      data: { config: freshConfig as object },
     });
 
     // Show a "queued" beat immediately so the UI has something to render
