@@ -84,34 +84,44 @@ async function rateLimitedFetch(apiKey: string, path: string, params?: Record<st
   throw new Error("Instantly API failed after retries");
 }
 
+type FetchOutcome = "reached_end" | "early_terminated" | "time_budget";
+
 async function fetchEmailsIncremental(
   integrationId: string,
   apiKey: string,
   existingIds: Set<string>,
   timeBudgetMs: number,
   startTime: number,
-): Promise<{ emails: InstantlyEmail[]; exhausted: boolean }> {
+  /** If set, resume a multi-run backfill from this cursor instead of newest. */
+  resumeCursor: string | undefined,
+  /** Gate the "page is mostly old, stop" heuristic. Only safe once we've
+   *  walked the full history at least once — otherwise it causes historical
+   *  emails to never be paginated to because recent pages are already-synced. */
+  allowEarlyTermination: boolean,
+): Promise<{ emails: InstantlyEmail[]; outcome: FetchOutcome; nextCursor?: string }> {
   const allEmails: InstantlyEmail[] = [];
-  let cursor: string | undefined;
+  let cursor: string | undefined = resumeCursor;
   let page = 0;
-  let exhausted = true; // true = we fetched everything (no early exit)
+  let outcome: FetchOutcome = "reached_end";
 
   while (true) {
-    // Time-budget check — leave room for processing
+    // Time-budget check — leave room for processing. If we bail here the
+    // caller persists `cursor` so the next sync picks up from this exact
+    // page, so large histories back-fill across multiple runs.
     if (Date.now() - startTime > timeBudgetMs * 0.5) {
-      console.log(`[sync] Fetch phase hit 50% time budget after ${page} pages, proceeding to process`);
-      exhausted = false;
+      console.log(`[sync] Fetch phase hit 50% time budget after ${page} pages — will resume from cursor on next sync`);
+      outcome = "time_budget";
       break;
     }
 
     const params: Record<string, string> = {
       limit: String(PAGE_SIZE),
-      sort_order: "desc", // Newest first — so we can stop early
+      sort_order: "desc", // Newest first — lets delta syncs early-terminate
     };
     if (cursor) params.starting_after = cursor;
 
     page++;
-    console.log(`[sync] Fetching emails page ${page}${cursor ? ` (cursor: ${cursor.slice(0, 8)}...)` : ""}...`);
+    console.log(`[sync] Fetching emails page ${page}${cursor ? ` (cursor: ${cursor.slice(0, 8)}...)` : ""}${resumeCursor && page === 1 ? " [resuming backfill]" : ""}`);
     await updateSyncProgress(integrationId, {
       stage: "fetching_pages",
       message: `Fetching page ${page} of emails (${allEmails.length} so far)`,
@@ -124,14 +134,17 @@ async function fetchEmailsIncremental(
     if (items.length === 0) break;
     allEmails.push(...items);
 
-    // Early termination: if >80% of this page already synced, the rest
-    // is old data we've seen before — stop fetching more pages.
     const newInPage = items.filter((e) => !existingIds.has(e.id)).length;
     const pctNew = newInPage / items.length;
     console.log(`[sync] Page ${page}: ${items.length} emails, ${newInPage} new (${Math.round(pctNew * 100)}%) — total fetched: ${allEmails.length}`);
 
-    if (pctNew < 0.2 && page > 1) {
+    // Early termination — only safe after a full historical backfill. Before
+    // that, the "mostly-old" pattern fires on page 2 for accounts that have
+    // recent activity + a historical gap, and we'd never paginate back far
+    // enough to fill the gap.
+    if (allowEarlyTermination && pctNew < 0.2 && page > 1) {
       console.log(`[sync] Early termination: page ${page} is mostly old data`);
+      outcome = "early_terminated";
       break;
     }
 
@@ -139,7 +152,7 @@ async function fetchEmailsIncremental(
     if (!cursor || items.length < PAGE_SIZE) break;
   }
 
-  return { emails: allEmails, exhausted };
+  return { emails: allEmails, outcome, nextCursor: cursor };
 }
 
 async function fetchCampaigns(apiKey: string): Promise<Map<string, string>> {
@@ -253,26 +266,42 @@ export async function syncInstantly(
   const campaignMap = await fetchCampaigns(apiKey);
   console.log(`[sync] Found ${campaignMap.size} campaigns`);
 
-  // Batch dedup — fetch existing externalIds from recent Instantly messages only.
-  // Filter out HeyReach IDs (prefixed "hr_") so each provider scopes to its own,
-  // and limit to last 90 days to avoid loading the entire table into memory.
-  const dedupCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  // Batch dedup — load every Instantly externalId ever seen for this
+  // workspace. Previously scoped to 90 days, which made the early-termination
+  // heuristic wrong: historical pages returned false-positive "all new" and
+  // we'd stop before reaching them. Scales fine — each id is ~24 chars, so
+  // even a million-message workspace is < 50MB.
   const existingIds = new Set(
     (await prisma.message.findMany({
       where: {
         workspaceId,
         externalId: { not: null },
         NOT: { externalId: { startsWith: "hr_" } },
-        receivedAt: { gte: dedupCutoff },
       },
       select: { externalId: true },
     })).map((m) => m.externalId).filter(Boolean)
   );
 
-  const { emails } = await fetchEmailsIncremental(
-    integrationId, apiKey, existingIds as Set<string>, timeBudgetMs, startTime,
+  // Backfill state. For large Instantly accounts one sync run can't walk the
+  // full history inside Vercel's 300s function limit — we save a resume
+  // cursor when the fetch phase hits its time budget, so subsequent syncs
+  // pick up where the last one stopped. Once we've reached the end of
+  // Instantly's history, `backfillComplete` goes true and future syncs use
+  // delta mode (early termination) for efficiency.
+  const config = ((integration.config as Record<string, unknown>) ?? {});
+  const backfillComplete = config.instantlyBackfillComplete === true;
+  const resumeCursor = config.instantlyBackfillCursor as string | undefined;
+
+  const { emails, outcome, nextCursor } = await fetchEmailsIncremental(
+    integrationId,
+    apiKey,
+    existingIds as Set<string>,
+    timeBudgetMs,
+    startTime,
+    resumeCursor,
+    backfillComplete,
   );
-  console.log(`[sync] Fetched ${emails.length} emails from Instantly`);
+  console.log(`[sync] Fetched ${emails.length} emails from Instantly (outcome: ${outcome}${resumeCursor ? ", resumed" : ""})`);
 
   // Sort newest-first so the most recent data appears immediately.
   // The thread resolver handles out-of-order processing correctly
@@ -341,9 +370,27 @@ export async function syncInstantly(
     percent: 95,
   });
 
+  // Persist backfill progress. Re-read config because other writes (progress
+  // beats) may have mutated it during this run.
+  const freshRow = await prisma.integration.findUnique({
+    where: { id: integrationId },
+    select: { config: true },
+  });
+  const freshConfig = ((freshRow?.config as Record<string, unknown>) ?? {});
+  if (outcome === "time_budget" && nextCursor) {
+    // Ran out of time mid-walk — resume here next run.
+    freshConfig.instantlyBackfillCursor = nextCursor;
+  } else if (outcome === "reached_end") {
+    // Walked to the end of Instantly's history. Backfill is complete;
+    // future syncs run in efficient delta mode (early termination on).
+    freshConfig.instantlyBackfillComplete = true;
+    delete freshConfig.instantlyBackfillCursor;
+  }
+  // outcome === "early_terminated" only fires when backfillComplete is
+  // already true, so no state change needed.
   await prisma.integration.update({
     where: { id: integrationId },
-    data: { lastSyncAt: new Date() },
+    data: { config: freshConfig as object, lastSyncAt: new Date() },
   });
 
   const elapsed = Math.round((Date.now() - startTime) / 1000);
