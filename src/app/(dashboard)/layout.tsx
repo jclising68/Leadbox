@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useWorkspaces } from "@/hooks/use-workspace";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { AppSidebar } from "./components/app-sidebar";
+import { AppHeader } from "./components/app-header";
 
 export default function DashboardLayout({
   children,
@@ -94,9 +95,12 @@ export default function DashboardLayout({
   return (
     <div className="flex h-screen overflow-hidden">
       <AppSidebar />
-      <main className="flex-1 overflow-hidden">
-        {children}
-      </main>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <AppHeader />
+        <main className="flex-1 overflow-hidden">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

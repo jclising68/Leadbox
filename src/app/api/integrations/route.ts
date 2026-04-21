@@ -7,6 +7,7 @@ import { v4 as uuid } from "uuid";
 import { syncInstantly, testInstantlyConnection } from "@/services/instantly-sync";
 import { syncHeyreach, testHeyreachConnection } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
+import type { SyncProgress } from "@/services/sync-progress";
 
 // Initial sync + enrichment can take a while for large accounts
 export const maxDuration = 300;
@@ -88,6 +89,7 @@ export async function GET(req: NextRequest) {
       syncing: !!config.syncRunning,
       syncStartedAt: syncStartedAt ?? null,
       syncStuck,
+      syncProgress: (config.syncProgress as SyncProgress | undefined) ?? null,
       enriching: !!config.enrichRunning,
       lastError: (config.lastError as string | undefined) ?? null,
       lastErrorAt: (config.lastErrorAt as string | undefined) ?? null,

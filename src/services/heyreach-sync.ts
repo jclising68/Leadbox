@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
 import { resolveThread } from "@/services/thread-resolver";
+import { updateSyncProgress } from "@/services/sync-progress";
 import type { NormalizedWebhookPayload } from "@/types";
 
 // Correct HeyReach API base URL (ABP framework, public API)
@@ -136,6 +137,7 @@ async function fetchCampaigns(apiKey: string): Promise<HeyReachCampaign[]> {
 }
 
 async function fetchConversationsIncremental(
+  integrationId: string,
   apiKey: string,
   lastSyncAt: Date | null,
   timeBudgetMs: number,
@@ -144,6 +146,7 @@ async function fetchConversationsIncremental(
   const all: HeyReachConversation[] = [];
   let offset = 0;
   let exhausted = true;
+  let page = 0;
 
   while (true) {
     // Time-budget: leave half for processing
@@ -152,6 +155,14 @@ async function fetchConversationsIncremental(
       exhausted = false;
       break;
     }
+
+    page++;
+    await updateSyncProgress(integrationId, {
+      stage: "fetching_conversations",
+      message: `Fetching conversations page ${page} (${all.length} so far)`,
+      current: page,
+      percent: Math.min(10 + page * 5, 55),
+    });
 
     const data = await heyreachPost(apiKey, "/Inbox/GetConversationsV2", {
       offset,
@@ -239,11 +250,21 @@ export async function syncHeyreach(
   const workspaceId = integration.workspaceId;
 
   console.log(`[heyreach] Starting sync for integration ${integrationId}`);
+  await updateSyncProgress(integrationId, {
+    stage: "starting",
+    message: "Starting HeyReach sync",
+    percent: 2,
+  });
 
   // 1. Fetch campaigns and conversations (with incremental awareness)
+  await updateSyncProgress(integrationId, {
+    stage: "fetching_campaigns",
+    message: "Loading campaigns",
+    percent: 5,
+  });
   const campaigns = await fetchCampaigns(apiKey);
   const { conversations } = await fetchConversationsIncremental(
-    apiKey, integration.lastSyncAt, timeBudgetMs, startTime,
+    integrationId, apiKey, integration.lastSyncAt, timeBudgetMs, startTime,
   );
 
   console.log(`[heyreach] Processing ${conversations.length} conversations...`);
@@ -316,6 +337,14 @@ export async function syncHeyreach(
   console.log(`[heyreach] ${alreadySynced} already synced, ${newPayloads.length} new messages to process`);
   skipped += alreadySynced;
 
+  await updateSyncProgress(integrationId, {
+    stage: "processing",
+    message: `Processing ${newPayloads.length} new messages`,
+    total: newPayloads.length,
+    current: 0,
+    percent: 60,
+  });
+
   // 3. Sync only NEW messages to threads
   for (let i = 0; i < newPayloads.length; i += 20) {
     // Time-budget check
@@ -335,6 +364,20 @@ export async function syncHeyreach(
         }
       })
     );
+
+    if (synced > 0 && i % 40 === 0) {
+      await updateSyncProgress(integrationId, {
+        stage: "processing",
+        message: `Processed ${synced}/${newPayloads.length} messages`,
+        current: synced,
+        total: newPayloads.length,
+        percent: Math.min(
+          60 + Math.floor((synced / Math.max(newPayloads.length, 1)) * 30),
+          89,
+        ),
+      });
+    }
+
     if (i + 20 < newPayloads.length) await new Promise((r) => setTimeout(r, 100));
   }
 
@@ -344,15 +387,30 @@ export async function syncHeyreach(
   // Skip enrichment if we've used >80% of time budget — it'll run next cycle
   if (Date.now() - startTime > timeBudgetMs * 0.8) {
     console.log(`[heyreach] Skipping enrichment — time budget ${Math.round((Date.now() - startTime) / 1000)}s, will enrich next cycle`);
+    await updateSyncProgress(integrationId, {
+      stage: "finalizing",
+      message: "Finalizing (enrichment deferred)",
+      percent: 95,
+    });
     await prisma.integration.update({
       where: { id: integrationId },
       data: { lastSyncAt: new Date() },
     });
     const elapsed = Math.round((Date.now() - startTime) / 1000);
     console.log(`[heyreach] Sync complete in ${elapsed}s: ${synced} synced, ${skipped} skipped, ${errors} errors (enrichment deferred)`);
+    await updateSyncProgress(integrationId, {
+      stage: "done",
+      message: `Synced ${synced} new messages (enrichment deferred)`,
+      percent: 100,
+    });
     return { synced, skipped, errors };
   }
 
+  await updateSyncProgress(integrationId, {
+    stage: "enriching",
+    message: `Enriching prospects from ${conversations.length} conversations`,
+    percent: 90,
+  });
   console.log(`[heyreach] Enriching prospects from ${conversations.length} conversations...`);
 
   // Build profileUrl → campaign name mapping from all campaigns
@@ -499,6 +557,12 @@ export async function syncHeyreach(
 
   console.log(`[heyreach] Enriched ${enriched} prospects`);
 
+  await updateSyncProgress(integrationId, {
+    stage: "finalizing",
+    message: "Finalizing",
+    percent: 95,
+  });
+
   // 5. Update lastSyncAt
   await prisma.integration.update({
     where: { id: integrationId },
@@ -507,6 +571,11 @@ export async function syncHeyreach(
 
   const elapsed = Math.round((Date.now() - startTime) / 1000);
   console.log(`[heyreach] Sync complete in ${elapsed}s: ${synced} synced, ${skipped} skipped, ${errors} errors`);
+  await updateSyncProgress(integrationId, {
+    stage: "done",
+    message: `Synced ${synced} new messages`,
+    percent: 100,
+  });
   return { synced, skipped, errors };
 }
 

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
 import { resolveThread } from "@/services/thread-resolver";
+import { updateSyncProgress } from "@/services/sync-progress";
 import type { NormalizedWebhookPayload } from "@/types";
 
 const INSTANTLY_API_BASE = "https://api.instantly.ai/api/v2";
@@ -84,6 +85,7 @@ async function rateLimitedFetch(apiKey: string, path: string, params?: Record<st
 }
 
 async function fetchEmailsIncremental(
+  integrationId: string,
   apiKey: string,
   existingIds: Set<string>,
   timeBudgetMs: number,
@@ -108,7 +110,14 @@ async function fetchEmailsIncremental(
     };
     if (cursor) params.starting_after = cursor;
 
-    console.log(`[sync] Fetching emails page ${++page}${cursor ? ` (cursor: ${cursor.slice(0, 8)}...)` : ""}...`);
+    page++;
+    console.log(`[sync] Fetching emails page ${page}${cursor ? ` (cursor: ${cursor.slice(0, 8)}...)` : ""}...`);
+    await updateSyncProgress(integrationId, {
+      stage: "fetching_pages",
+      message: `Fetching page ${page} of emails (${allEmails.length} so far)`,
+      current: page,
+      percent: Math.min(10 + page * 5, 55),
+    });
     const data = await rateLimitedFetch(apiKey, "/emails", params);
     const items = (data.items || []) as InstantlyEmail[];
 
@@ -230,7 +239,17 @@ export async function syncInstantly(
   const workspaceId = integration.workspaceId;
 
   console.log(`[sync] Starting Instantly sync for integration ${integrationId}`);
+  await updateSyncProgress(integrationId, {
+    stage: "starting",
+    message: "Starting Instantly sync",
+    percent: 2,
+  });
 
+  await updateSyncProgress(integrationId, {
+    stage: "fetching_campaigns",
+    message: "Loading campaigns",
+    percent: 5,
+  });
   const campaignMap = await fetchCampaigns(apiKey);
   console.log(`[sync] Found ${campaignMap.size} campaigns`);
 
@@ -251,7 +270,7 @@ export async function syncInstantly(
   );
 
   const { emails } = await fetchEmailsIncremental(
-    apiKey, existingIds as Set<string>, timeBudgetMs, startTime,
+    integrationId, apiKey, existingIds as Set<string>, timeBudgetMs, startTime,
   );
   console.log(`[sync] Fetched ${emails.length} emails from Instantly`);
 
@@ -270,6 +289,14 @@ export async function syncInstantly(
   let synced = 0;
   let skipped = emails.length - newEmails.length;
   let errors = 0;
+
+  await updateSyncProgress(integrationId, {
+    stage: "processing",
+    message: `Processing ${newEmails.length} new messages`,
+    total: newEmails.length,
+    current: 0,
+    percent: 60,
+  });
 
   // Process only NEW emails sequentially to maintain thread ordering
   for (const email of newEmails) {
@@ -293,7 +320,26 @@ export async function syncInstantly(
         console.error(`[sync] Error processing email ${email.id}:`, err instanceof Error ? err.message : err);
       }
     }
+
+    if (synced > 0 && synced % 25 === 0) {
+      await updateSyncProgress(integrationId, {
+        stage: "processing",
+        message: `Processed ${synced}/${newEmails.length} messages`,
+        current: synced,
+        total: newEmails.length,
+        percent: Math.min(
+          60 + Math.floor((synced / Math.max(newEmails.length, 1)) * 30),
+          89,
+        ),
+      });
+    }
   }
+
+  await updateSyncProgress(integrationId, {
+    stage: "finalizing",
+    message: "Finalizing",
+    percent: 95,
+  });
 
   await prisma.integration.update({
     where: { id: integrationId },
@@ -302,6 +348,11 @@ export async function syncInstantly(
 
   const elapsed = Math.round((Date.now() - startTime) / 1000);
   console.log(`[sync] Instantly sync complete in ${elapsed}s: ${synced} synced, ${skipped} skipped, ${errors} errors`);
+  await updateSyncProgress(integrationId, {
+    stage: "done",
+    message: `Synced ${synced} new messages`,
+    percent: 100,
+  });
   return { synced, skipped, errors };
 }
 

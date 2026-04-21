@@ -49,6 +49,12 @@ export default function IntegrationsPage() {
       return res.json();
     },
     enabled: !!workspaceId,
+    // Poll faster when any integration is actively syncing so the progress
+    // bar feels live; otherwise the page is mostly static.
+    refetchInterval: (q) => {
+      const list = (q.state.data as { syncing?: boolean }[] | undefined) ?? [];
+      return list.some((i) => i.syncing) ? 2000 : 15000;
+    },
   });
 
   const createMutation = useMutation({
@@ -282,6 +288,14 @@ export default function IntegrationsPage() {
               createdAt: string;
               lastError?: string | null;
               lastErrorAt?: string | null;
+              syncProgress?: {
+                stage: string;
+                message: string;
+                percent: number;
+                current?: number;
+                total?: number;
+                updatedAt: string;
+              } | null;
             }) => (
               <Card key={int.id} className={!int.isActive ? "opacity-70" : ""}>
                 <CardHeader className="pb-3">
@@ -401,6 +415,25 @@ export default function IntegrationsPage() {
                       >
                         unstick
                       </button>
+                    </div>
+                  )}
+                  {int.syncing && int.syncProgress && (
+                    <div className="mt-2 rounded-md border border-primary/20 bg-primary/5 px-2.5 py-1.5">
+                      <div className="flex items-center justify-between text-xs text-foreground mb-1">
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                          <span className="truncate">{int.syncProgress.message}</span>
+                        </span>
+                        <span className="tabular-nums text-muted-foreground shrink-0 ml-2">
+                          {Math.round(int.syncProgress.percent)}%
+                        </span>
+                      </div>
+                      <div className="h-1 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-all duration-300"
+                          style={{ width: `${Math.min(Math.max(int.syncProgress.percent, 2), 100)}%` }}
+                        />
+                      </div>
                     </div>
                   )}
                 </CardHeader>

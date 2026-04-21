@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
+import { updateSyncProgress } from "@/services/sync-progress";
 
 const INSTANTLY_API_BASE = "https://api.instantly.ai/api/v2";
 const MIN_REQUEST_GAP_MS = 1000; // Match sync rate — 1 req/sec is safely under Instantly v2 limits
@@ -295,6 +296,11 @@ export async function enrichFromInstantly(
   const workspaceId = integration.workspaceId;
 
   console.log(`[enrich] Starting enrichment for integration ${integrationId} (budget: ${Math.round(timeBudgetMs / 1000)}s)`);
+  await updateSyncProgress(integrationId, {
+    stage: "enriching_start",
+    message: "Starting lead enrichment",
+    percent: 2,
+  });
 
   // 1. Get campaigns once for name lookup.
   const campaignData = await rateLimitedGet(apiKey, "/campaigns", { limit: "100" });
@@ -377,6 +383,23 @@ export async function enrichFromInstantly(
       if (Date.now() - startTime > timeBudgetMs) break;
       if (!lead.email) continue;
       processed++;
+
+      if (processed > 0 && processed % 25 === 0) {
+        const done = enriched + imported;
+        // We don't know the total until all pages are fetched, so base
+        // progress on elapsed time relative to budget (capped at 97%).
+        const budgetPct = Math.min(
+          2 + Math.floor(((Date.now() - startTime) / timeBudgetMs) * 95),
+          97,
+        );
+        await updateSyncProgress(integrationId, {
+          stage: "enriching",
+          message: `Enriched ${done}/${processed}`,
+          current: done,
+          total: processed,
+          percent: budgetPct,
+        });
+      }
 
       try {
         const emailLower = lead.email.toLowerCase();
@@ -517,5 +540,10 @@ export async function enrichFromInstantly(
   }
 
   console.log(`[enrich] Done: ${enriched} enriched, ${imported} imported, ${campaigns.length} campaigns, ${errors} errors`);
+  await updateSyncProgress(integrationId, {
+    stage: "done",
+    message: `Enriched ${enriched} leads`,
+    percent: 100,
+  });
   return { enriched, imported, campaigns: campaigns.length, errors };
 }

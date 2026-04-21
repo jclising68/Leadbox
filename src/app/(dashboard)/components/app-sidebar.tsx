@@ -2,11 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
-import { signOut } from "next-auth/react";
 import {
   Inbox,
-  Settings,
-  LogOut,
   Briefcase,
   Archive,
   Trash2,
@@ -14,10 +11,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Check,
-  Sun,
-  Moon,
 } from "lucide-react";
-import { useTheme } from "next-themes";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -89,30 +83,10 @@ function NavLink({
   );
 }
 
-function ThemeToggle({ collapsed }: { collapsed: boolean }) {
-  const { theme, setTheme } = useTheme();
-  const isDark = theme === "dark";
-
-  return (
-    <button
-      title={collapsed ? (isDark ? "Light mode" : "Dark mode") : undefined}
-      onClick={() => setTheme(isDark ? "light" : "dark")}
-      className={cn(
-        "flex items-center gap-3 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors",
-        collapsed ? "justify-center w-9 h-9" : "px-3 h-9"
-      )}
-    >
-      {isDark ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
-      {!collapsed && <span className="text-sm truncate">{isDark ? "Light mode" : "Dark mode"}</span>}
-    </button>
-  );
-}
-
 export function AppSidebar() {
-  const pathname = usePathname();
   const router = useRouter();
   const { data: workspaces } = useWorkspaces();
-  const { activeWorkspaceId, setActiveWorkspace } = useWorkspaceStore();
+  const { activeWorkspaceId } = useWorkspaceStore();
   const { sidebarCollapsed } = useInboxStore();
 
   const activeWorkspace = workspaces?.find((w: { id: string }) => w.id === activeWorkspaceId);
@@ -188,43 +162,10 @@ export function AppSidebar() {
       <div className="flex-1" />
 
       {/* Bottom Nav */}
-      <div className={cn("space-y-0.5 flex flex-col", collapsed ? "items-center" : "px-2")}>
+      <div className={cn("space-y-0.5 flex flex-col pb-3", collapsed ? "items-center" : "px-2")}>
         {bottomNavItems.map((item) => (
           <NavLink key={item.path} item={item} collapsed={collapsed} />
         ))}
-      </div>
-
-      <div className={cn("my-2 border-t", collapsed ? "mx-auto w-8" : "mx-3")} />
-
-      {/* Settings + Theme + Logout */}
-      <div className={cn("flex flex-col space-y-0.5 pb-3", collapsed ? "items-center" : "px-2")}>
-        <ThemeToggle collapsed={collapsed} />
-        <Link
-          href={activeWorkspace ? `/ws/${activeWorkspace.slug}/settings/personal` : "/settings/personal"}
-          title={collapsed ? "Settings" : undefined}
-          className={cn(
-            "flex items-center gap-3 rounded-md transition-colors",
-            collapsed ? "justify-center w-9 h-9" : "px-3 h-9",
-            pathname.includes("/settings")
-              ? "bg-primary/10 text-primary font-medium"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          )}
-        >
-          <Settings className="h-4 w-4 shrink-0" />
-          {!collapsed && <span className="text-sm truncate">Settings</span>}
-        </Link>
-
-        <button
-          title={collapsed ? "Logout" : undefined}
-          onClick={() => signOut({ callbackUrl: "/login" })}
-          className={cn(
-            "flex items-center gap-3 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors",
-            collapsed ? "justify-center w-9 h-9" : "px-3 h-9"
-          )}
-        >
-          <LogOut className="h-4 w-4 shrink-0" />
-          {!collapsed && <span className="text-sm truncate">Logout</span>}
-        </button>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
+import { updateSyncProgress } from "@/services/sync-progress";
 
 export const maxDuration = 300;
 
@@ -111,6 +112,14 @@ export async function POST(req: NextRequest) {
           syncStartedAt: new Date().toISOString(),
         },
       },
+    });
+
+    // Show a "queued" beat immediately so the UI has something to render
+    // before the background sync boots.
+    await updateSyncProgress(integration.id, {
+      stage: "queued",
+      message: "Queued — starting soon",
+      percent: 0,
     });
 
     after(async () => {

@@ -4,6 +4,7 @@ import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
+import { updateSyncProgress } from "@/services/sync-progress";
 import { after } from "next/server";
 import { workspaceJson } from "@/lib/api-response";
 
@@ -92,6 +93,13 @@ export async function POST(
 
   // Mark sync as running and schedule background work
   await markSyncRunning(id, true);
+  // Show a "queued" beat immediately so the UI can render progress before
+  // the background sync boots.
+  await updateSyncProgress(id, {
+    stage: "queued",
+    message: "Queued — starting soon",
+    percent: 0,
+  });
 
   after(async () => {
     const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
