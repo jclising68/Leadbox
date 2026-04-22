@@ -1,5 +1,14 @@
 @AGENTS.md
 
+## Engineering Discipline (STRICT — read first)
+
+These are non-negotiable. The user has been burned by each of these; violating them costs real production time.
+
+- **Never `git push` unless the user explicitly says push/deploy/ship.** Committing is not permission to push. Approval to push earlier in the session is not a standing grant — it's per-request.
+- **No bandaid fixes. Find the root cause.** If a fix is patching a symptom, stop and dig until the actual cause is identified. State the root cause in every fix plan. If unsure it's root cause, say so before coding.
+- **Align before coding.** For any non-trivial change, outline the approach in 3–4 bullets (library/method, data flow, assumptions, scaling behavior) and wait for explicit approval. Never make unrequested adjacent changes — surface them as questions instead.
+- **Solutions must be efficient, scalable, and reliable.** This app handles thousands of contacts across many workspaces. State scaling behavior in every plan — API call volume, complexity, worst-case bounds at 10× load. Prefer persistent cursors, in-memory maps, idempotent upserts.
+
 ## Stack & Auth
 
 - This is a **Next.js 15 + TypeScript + Supabase + Prisma + Bun** project, deployed on **Vercel**
