@@ -192,11 +192,41 @@ async function fetchConversationsIncremental(
       }
     }
 
-    if (all.length >= total || items.length < BATCH_SIZE) break;
+    // Rely on the server's totalCount for end-of-history; a short page
+    // alone can happen mid-walk if HeyReach trims a response, and breaking
+    // on it would leave older conversations unsynced.
+    if (total > 0 && all.length >= total) break;
+    if (total === 0 && items.length < BATCH_SIZE) break;
     await new Promise((r) => setTimeout(r, 300));
   }
 
   return { conversations: all, exhausted };
+}
+
+// Fetch the up-to-date tag set for one lead. HeyReach's conversation
+// endpoint *claims* to include `correspondentProfile.tags` but in practice
+// always returns an empty array, so user-applied tags weren't reaching the
+// inbox. `/lead/GetTags` is the source of truth (confirmed against the
+// production API — see scripts/test-heyreach-tags-path.ts).
+async function fetchTagsForLead(
+  apiKey: string,
+  profileUrl: string,
+): Promise<string[]> {
+  try {
+    const data = (await heyreachPost(apiKey, "/lead/GetTags", {
+      profileUrl,
+    })) as { tags?: string[] };
+    return data.tags ?? [];
+  } catch (err) {
+    // Non-fatal — tag fetch missing shouldn't block enrichment of everything
+    // else. Single-lead 404s happen when HeyReach hasn't indexed a very new
+    // conversation yet.
+    console.log(
+      `[heyreach] GetTags failed for ${profileUrl}:`,
+      err instanceof Error ? err.message : err,
+    );
+    return [];
+  }
 }
 
 async function fetchLeadsFromCampaign(
@@ -445,9 +475,17 @@ export async function syncHeyreach(
 
   // Enrich each prospect from conversation profiles
   let enriched = 0;
+  let taggedApplied = 0;
   for (const conv of conversations) {
     const profile = conv.correspondentProfile;
     if (!profile?.profileUrl) continue;
+
+    // Soft enrichment time budget — stop the expensive per-lead tag fetch
+    // once we're near the function timeout; remaining leads pick up next run.
+    if (Date.now() - startTime > timeBudgetMs * 0.9) {
+      console.log(`[heyreach] Enrichment time budget exhausted at conv, remaining prospects deferred to next sync`);
+      break;
+    }
 
     try {
       const updateData: Record<string, unknown> = {};
@@ -465,9 +503,18 @@ export async function syncHeyreach(
         updateData.domain = email.split("@")[1];
       }
 
+      // Pull the authoritative tag set from /lead/GetTags. Merge with any
+      // tags already embedded in the conversation profile (defensive — the
+      // embedded list is usually empty but costs nothing to combine).
+      const fetchedTags = await fetchTagsForLead(apiKey, profile.profileUrl);
+      await new Promise((r) => setTimeout(r, 200));
+      const allTags = Array.from(
+        new Set([...(profile.tags ?? []), ...fetchedTags].map((t) => t.trim()).filter(Boolean)),
+      );
+
       // Lead status from tags (e.g. "Meeting booked", "Interested")
-      if (profile.tags && profile.tags.length > 0) {
-        updateData.leadStatus = profile.tags[0];
+      if (allTags.length > 0) {
+        updateData.leadStatus = allTags[0];
       }
 
       // Campaign info from leads-per-campaign data
@@ -518,13 +565,13 @@ export async function syncHeyreach(
 
       // Apply tags as thread labels — auto-create the label if missing so
       // user-defined HeyReach tags surface in the inbox without manual setup.
-      if (profile.tags && profile.tags.length > 0 && profile.profileUrl) {
+      if (allTags.length > 0 && profile.profileUrl) {
         const prospect = await prisma.prospect.findFirst({
           where: { workspaceId, linkedinUrl: profile.profileUrl },
           select: { thread: { select: { id: true } } },
         });
         if (prospect?.thread) {
-          for (const tag of profile.tags) {
+          for (const tag of allTags) {
             let label = await prisma.label.findFirst({
               where: { workspaceId, name: { equals: tag, mode: "insensitive" } },
               select: { id: true },
@@ -548,6 +595,7 @@ export async function syncHeyreach(
               update: {},
             });
           }
+          taggedApplied++;
         }
       }
     } catch {
@@ -555,7 +603,7 @@ export async function syncHeyreach(
     }
   }
 
-  console.log(`[heyreach] Enriched ${enriched} prospects`);
+  console.log(`[heyreach] Enriched ${enriched} prospects, applied tags to ${taggedApplied} threads`);
 
   await updateSyncProgress(integrationId, {
     stage: "finalizing",
