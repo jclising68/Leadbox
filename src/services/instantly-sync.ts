@@ -117,6 +117,12 @@ async function fetchEmailsIncremental(
     const params: Record<string, string> = {
       limit: String(PAGE_SIZE),
       sort_order: "desc", // Newest first — lets delta syncs early-terminate
+      // Include ALL folders (Primary + Others). Default is emode_focused which
+      // silently hides "Others"-bucketed emails and caused per-workspace
+      // history gaps — e.g. an account with lots of reply-filtered mail would
+      // stop backfilling as soon as Instantly ran out of Primary items, even
+      // though older Others-folder emails still existed.
+      mode: "emode_all",
     };
     if (cursor) params.starting_after = cursor;
 
@@ -149,7 +155,12 @@ async function fetchEmailsIncremental(
     }
 
     cursor = data.next_starting_after as string | undefined;
-    if (!cursor || items.length < PAGE_SIZE) break;
+    // Only the absent cursor signals end-of-history. A partial page
+    // (items.length < PAGE_SIZE) can happen mid-walk when Instantly's
+    // response size limits or filter modes trim a page — breaking on it
+    // used to end the backfill prematurely and flip `backfillComplete=true`
+    // with older emails still unfetched.
+    if (!cursor) break;
   }
 
   return { emails: allEmails, outcome, nextCursor: cursor };

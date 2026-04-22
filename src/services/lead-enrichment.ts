@@ -532,7 +532,10 @@ export async function enrichFromInstantly(
     }
 
     cursor = data.next_starting_after as string | undefined;
-    if (!cursor || items.length < 100) break;
+    // Rely on cursor absence alone for end-of-history. A short page
+    // mid-walk can happen when Instantly trims a response; breaking on it
+    // would stop enrichment before every lead is processed.
+    if (!cursor) break;
   }
 
   if (Date.now() - startTime >= timeBudgetMs) {

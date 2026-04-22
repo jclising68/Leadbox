@@ -139,6 +139,55 @@ export async function POST(
     } finally {
       await markSyncRunning(id, false, syncError);
     }
+
+    // Auto-chain Instantly backfill. One click should walk the full history
+    // even for accounts with thousands of emails — without chaining, the
+    // user has to wait 15 min for cron to pick up the saved cursor, and is
+    // told "sync finished" while history is still incomplete. Bail if the
+    // flag's set, if there's no cursor, or if the chain hop count is at its
+    // cap (to prevent runaway recursion on a stuck cursor).
+    if (!syncError && integration.provider === "INSTANTLY") {
+      const fresh = await prisma.integration.findUnique({
+        where: { id: integration.id },
+        select: { config: true },
+      });
+      const cfg = (fresh?.config as Record<string, unknown>) ?? {};
+      if (!cfg.instantlyBackfillComplete && cfg.instantlyBackfillCursor) {
+        const hop = Number(cfg.backfillChainHop ?? 0);
+        const MAX_HOPS = 5;
+        if (hop < MAX_HOPS) {
+          cfg.backfillChainHop = hop + 1;
+          await prisma.integration.update({
+            where: { id: integration.id },
+            data: { config: cfg as object },
+          });
+          const origin = req.nextUrl.origin;
+          console.log(`[sync] Chaining backfill run ${hop + 1}/${MAX_HOPS} for ${id}`);
+          // Fire-and-forget — the next function picks up from the saved cursor.
+          fetch(`${origin}/api/integrations/${id}/sync`, {
+            method: "POST",
+            headers: {
+              "x-workspace-id": integration.workspaceId,
+              cookie: req.headers.get("cookie") ?? "",
+            },
+          }).catch((e) => console.error("[sync] Chain trigger failed:", e));
+        } else {
+          // Hop cap reached — clear so cron or next manual click can resume.
+          delete cfg.backfillChainHop;
+          await prisma.integration.update({
+            where: { id: integration.id },
+            data: { config: cfg as object },
+          });
+          console.log(`[sync] Backfill chain hop cap reached for ${id}; cron will continue.`);
+        }
+      } else if (cfg.backfillChainHop) {
+        delete cfg.backfillChainHop;
+        await prisma.integration.update({
+          where: { id: integration.id },
+          data: { config: cfg as object },
+        });
+      }
+    }
   });
 
   return NextResponse.json({

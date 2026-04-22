@@ -3,26 +3,15 @@ import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { workspaceJson } from "@/lib/api-response";
 
-type NotificationItem =
-  | {
-      id: string;
-      type: "reply";
-      threadId: string;
-      title: string;
-      subtitle: string;
-      at: string;
-      isUnread: boolean;
-    }
-  | {
-      id: string;
-      type: "label";
-      threadId: string;
-      title: string;
-      subtitle: string;
-      at: string;
-      labelColor: string;
-      isUnread: boolean;
-    };
+type NotificationItem = {
+  id: string;
+  type: "reply";
+  threadId: string;
+  title: string;
+  subtitle: string;
+  at: string;
+  isUnread: boolean;
+};
 
 export async function GET(req: NextRequest) {
   const { error, workspaceId } = await requireWorkspaceAccess(req);
@@ -30,8 +19,11 @@ export async function GET(req: NextRequest) {
 
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  // New inbound replies in the last 7 days — grouped by thread (most recent
-  // message per thread wins so one thread doesn't flood the list).
+  // Only actual responses — inbound replies in the last 7 days — grouped by
+  // thread (most recent message per thread wins so one thread doesn't flood
+  // the list). Auto-tag events were removed: they fire on the same reply
+  // that already notifies, so keeping them meant two notifications per
+  // engagement.
   const replies = await prisma.message.findMany({
     where: {
       workspaceId: workspaceId!,
@@ -41,7 +33,7 @@ export async function GET(req: NextRequest) {
     },
     distinct: ["threadId"],
     orderBy: { receivedAt: "desc" },
-    take: 30,
+    take: 40,
     select: {
       id: true,
       threadId: true,
@@ -61,35 +53,7 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  // Recent label applications (auto AI + webhook-driven). Skip MANUAL —
-  // the user themselves applied those, so no need to notify.
-  const labelChanges = await prisma.threadLabel.findMany({
-    where: {
-      appliedAt: { gte: since },
-      source: { in: ["AUTO_AI", "WEBHOOK"] },
-      thread: { workspaceId: workspaceId!, status: { not: "TRASH" } },
-    },
-    orderBy: { appliedAt: "desc" },
-    take: 30,
-    select: {
-      id: true,
-      threadId: true,
-      appliedAt: true,
-      label: { select: { name: true, color: true } },
-      thread: {
-        select: {
-          isUnread: true,
-          prospect: {
-            select: { firstName: true, lastName: true, email: true },
-          },
-        },
-      },
-    },
-  });
-
-  const items: NotificationItem[] = [];
-
-  for (const r of replies) {
+  const items: NotificationItem[] = replies.map((r) => {
     const name =
       [r.thread.prospect.firstName, r.thread.prospect.lastName]
         .filter(Boolean)
@@ -100,7 +64,7 @@ export async function GET(req: NextRequest) {
     const subtitle =
       (r.bodyText ?? r.subject ?? "").replace(/\s+/g, " ").slice(0, 120) ||
       "New reply";
-    items.push({
+    return {
       id: `reply:${r.id}`,
       type: "reply",
       threadId: r.threadId,
@@ -108,33 +72,11 @@ export async function GET(req: NextRequest) {
       subtitle,
       at: (r.receivedAt ?? r.sentAt ?? new Date()).toISOString(),
       isUnread: r.thread.isUnread,
-    });
-  }
-
-  for (const lc of labelChanges) {
-    const name =
-      [lc.thread.prospect.firstName, lc.thread.prospect.lastName]
-        .filter(Boolean)
-        .join(" ")
-        .trim() ||
-      lc.thread.prospect.email ||
-      "Unknown";
-    items.push({
-      id: `label:${lc.id}`,
-      type: "label",
-      threadId: lc.threadId,
-      title: `${name} tagged "${lc.label.name}"`,
-      subtitle: "Auto-label applied",
-      at: lc.appliedAt.toISOString(),
-      labelColor: lc.label.color,
-      isUnread: lc.thread.isUnread,
-    });
-  }
-
-  items.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+    };
+  });
 
   return workspaceJson({
-    items: items.slice(0, 40),
+    items,
     generatedAt: new Date().toISOString(),
   });
 }

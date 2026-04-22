@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, MessageSquare, Tag, CheckCheck } from "lucide-react";
+import { Bell, MessageSquare, CheckCheck } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
@@ -12,13 +12,12 @@ import { cn } from "@/lib/utils";
 
 type NotificationItem = {
   id: string;
-  type: "reply" | "label";
+  type: "reply";
   threadId: string;
   title: string;
   subtitle: string;
   at: string;
   isUnread: boolean;
-  labelColor?: string;
 };
 
 const LAST_SEEN_KEY = "lb:notifications:lastSeenAt";
@@ -169,7 +168,7 @@ export function NotificationsBell() {
           {items.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
               <Bell className="h-6 w-6 opacity-40 mb-2" />
-              <p className="text-xs">No new replies or tags yet.</p>
+              <p className="text-xs">No new replies yet.</p>
             </div>
           ) : (
             items.map((item) => {
@@ -184,28 +183,8 @@ export function NotificationsBell() {
                   )}
                 >
                   <div className="flex items-start gap-2">
-                    <div
-                      className={cn(
-                        "mt-0.5 w-6 h-6 rounded-full flex items-center justify-center shrink-0 ring-1 ring-inset",
-                        item.type === "reply"
-                          ? "bg-primary/10 text-primary ring-primary/20"
-                          : "bg-muted text-muted-foreground ring-border"
-                      )}
-                      style={
-                        item.type === "label" && item.labelColor
-                          ? {
-                              backgroundColor: `${item.labelColor}22`,
-                              color: item.labelColor,
-                              boxShadow: `inset 0 0 0 1px ${item.labelColor}40`,
-                            }
-                          : undefined
-                      }
-                    >
-                      {item.type === "reply" ? (
-                        <MessageSquare className="h-3 w-3" />
-                      ) : (
-                        <Tag className="h-3 w-3" />
-                      )}
+                    <div className="mt-0.5 w-6 h-6 rounded-full flex items-center justify-center shrink-0 ring-1 ring-inset bg-primary/10 text-primary ring-primary/20">
+                      <MessageSquare className="h-3 w-3" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">

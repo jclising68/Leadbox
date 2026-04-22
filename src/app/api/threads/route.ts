@@ -80,24 +80,46 @@ export async function GET(req: NextRequest) {
     where.messages = { some: { AND: messageConditions } };
   }
 
+  const andConditions: Prisma.ThreadWhereInput[] = [];
+
+  // Default inbox view ("All messages" tab, OPEN status, no label selected):
+  // only show threads the prospect actually engaged with — has an INBOUND
+  // message OR has any tag/label applied. Sent-only threads with no reply or
+  // label are outbound-in-flight and belong in the leads tracker, not inbox.
+  // Label-tab clicks, Archive, Spam, Trash, and ALL views skip this filter.
+  if (!labelId && (status === "OPEN" || !status)) {
+    andConditions.push({
+      OR: [
+        { messages: { some: { direction: "INBOUND" } } },
+        { threadLabels: { some: {} } },
+      ],
+    });
+  }
+
   if (search) {
     // Search on prospect fields and thread snippet only.
     // Full-text search on message body (bodyText/messageText) was removed
     // because ILIKE '%term%' on large text columns causes sequential scans.
     // TODO: Add pg_trgm GIN indexes or Supabase FTS for message body search.
-    where.OR = [
-      { snippet: { contains: search, mode: "insensitive" } },
-      {
-        prospect: {
-          OR: [
-            { email: { contains: search, mode: "insensitive" } },
-            { firstName: { contains: search, mode: "insensitive" } },
-            { lastName: { contains: search, mode: "insensitive" } },
-            { company: { contains: search, mode: "insensitive" } },
-          ],
+    andConditions.push({
+      OR: [
+        { snippet: { contains: search, mode: "insensitive" } },
+        {
+          prospect: {
+            OR: [
+              { email: { contains: search, mode: "insensitive" } },
+              { firstName: { contains: search, mode: "insensitive" } },
+              { lastName: { contains: search, mode: "insensitive" } },
+              { company: { contains: search, mode: "insensitive" } },
+            ],
+          },
         },
-      },
-    ];
+      ],
+    });
+  }
+
+  if (andConditions.length > 0) {
+    where.AND = andConditions;
   }
 
   const threads = await prisma.thread.findMany({
