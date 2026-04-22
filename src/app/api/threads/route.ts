@@ -37,47 +37,36 @@ export async function GET(req: NextRequest) {
     where.isUnread = true;
   }
 
-  // Date range: match threads that have ANY message in the window, not just
-  // the most recent one. A thread with a Mar 27 reply + Apr 6 reply should
-  // appear when the user filters "March" — matching what they see in
-  // Instantly/HeyReach Unibox. Filtering on Thread.lastMessageAt would have
-  // hidden it because its *last* activity is April.
-  const messageDateRange: { gte?: Date; lte?: Date } | null =
-    dateFrom || dateTo ? {} : null;
-  if (messageDateRange) {
-    if (dateFrom) messageDateRange.gte = new Date(dateFrom);
+  // Channel + date use Thread-level fields so the filter matches exactly what
+  // the user sees in the row (channel icon + DATE column, both thread-level).
+  //
+  // Earlier versions filtered at message level to support multi-channel
+  // threads. That approach had a worse failure mode: a HeyReach thread with
+  // one stray Email stub message would appear under the Email filter showing
+  // an April date — confusing because the row icon and date both say "LinkedIn
+  // April" but the filter is Email Jan-Mar. Thread-level filtering matches
+  // user intent (the icon/date they see). Multi-channel continuity is
+  // preserved by updating Thread.channel in thread-resolver whenever a newer
+  // message of a different channel arrives, so the thread's primary channel
+  // follows the most recent activity.
+  if (channel) {
+    where.channel = channel as "EMAIL" | "LINKEDIN";
+  }
+  if (dateFrom || dateTo) {
+    const dateFilter: { gte?: Date; lte?: Date } = {};
+    if (dateFrom) dateFilter.gte = new Date(dateFrom);
     if (dateTo) {
       const end = new Date(dateTo);
       end.setHours(23, 59, 59, 999);
-      messageDateRange.lte = end;
+      dateFilter.lte = end;
     }
+    where.lastMessageAt = dateFilter;
   }
 
-  const messageConditions: Prisma.MessageWhereInput[] = [];
-  // Filter at the *message* level, not `Thread.channel`. Thread.channel is
-  // captured once at thread creation and never updated, so a prospect first
-  // seen via HeyReach keeps channel=LINKEDIN forever — their later Instantly
-  // emails were invisible under the Email tab. Multi-channel threads now
-  // correctly appear under whichever channels they have activity on.
-  if (channel) {
-    messageConditions.push({ channel: channel as "EMAIL" | "LINKEDIN" });
-  }
+  // hasReply stays message-level — it's a true existence check (does this
+  // thread have any inbound message?) independent of channel/date framing.
   if (hasReply === "true") {
-    messageConditions.push({ direction: "INBOUND" });
-  }
-  if (messageDateRange) {
-    // `sentAt` is the provider timestamp; fall back to `receivedAt` (ingest
-    // time) when sentAt is null, so messages without a provider timestamp
-    // still match filters.
-    messageConditions.push({
-      OR: [
-        { sentAt: messageDateRange },
-        { AND: [{ sentAt: null }, { receivedAt: messageDateRange }] },
-      ],
-    });
-  }
-  if (messageConditions.length > 0) {
-    where.messages = { some: { AND: messageConditions } };
+    where.messages = { some: { direction: "INBOUND" } };
   }
 
   const andConditions: Prisma.ThreadWhereInput[] = [];

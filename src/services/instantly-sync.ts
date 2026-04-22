@@ -6,7 +6,12 @@ import type { NormalizedWebhookPayload } from "@/types";
 
 const INSTANTLY_API_BASE = "https://api.instantly.ai/api/v2";
 const PAGE_SIZE = 100;
-const MIN_REQUEST_GAP_MS = 1000; // 1 request/sec — safely under Instantly v2 rate limits
+// 10 req/s — measured with a direct burst probe against Instantly's v2 API:
+// 10 req/s sustained produced 0 × 429s; 30 req/s sustained was clean; 100 req/s
+// bursts trip rate-limit token-bucket. 10 keeps us well under the throttle and
+// still roughly 10× faster than the previous 1 req/s pace. The per-request 429
+// backoff below is the safety net if Instantly tightens server-side.
+const MIN_REQUEST_GAP_MS = 100;
 
 // Per-API-key rate limiter so parallel syncs of different workspaces don't
 // throttle each other (each Instantly account has its own quota).
@@ -98,11 +103,17 @@ async function fetchEmailsIncremental(
    *  walked the full history at least once — otherwise it causes historical
    *  emails to never be paginated to because recent pages are already-synced. */
   allowEarlyTermination: boolean,
-): Promise<{ emails: InstantlyEmail[]; outcome: FetchOutcome; nextCursor?: string }> {
+  /** Stop walking (and flag backfillComplete) once we reach an email older
+   *  than this. Lets the user scope initial backfill to e.g. 2026-only
+   *  history and explicitly opt into older data via an "Expand" action.
+   *  Undefined means walk to the beginning of the account. */
+  cutoffDate: Date | undefined,
+): Promise<{ emails: InstantlyEmail[]; outcome: FetchOutcome; nextCursor?: string; oldestReached?: Date }> {
   const allEmails: InstantlyEmail[] = [];
   let cursor: string | undefined = resumeCursor;
   let page = 0;
   let outcome: FetchOutcome = "reached_end";
+  let oldestReached: Date | undefined;
 
   while (true) {
     // Time-budget check — leave room for processing. If we bail here the
@@ -128,11 +139,19 @@ async function fetchEmailsIncremental(
 
     page++;
     console.log(`[sync] Fetching emails page ${page}${cursor ? ` (cursor: ${cursor.slice(0, 8)}...)` : ""}${resumeCursor && page === 1 ? " [resuming backfill]" : ""}`);
+    // Honest progress: exact counts + the oldest email date we've reached.
+    // Previously the UI showed a fabricated percent (page * 5 + 10) that had
+    // no relationship to remaining work, so a 30k-email walk at page 20
+    // looked "55% done" when it was actually ~5% of the account.
+    const reachedLabel = oldestReached
+      ? ` (reached ${oldestReached.toISOString().slice(0, 10)})`
+      : "";
     await updateSyncProgress(integrationId, {
       stage: "fetching_pages",
-      message: `Fetching page ${page} of emails (${allEmails.length} so far)`,
-      current: page,
-      percent: Math.min(10 + page * 5, 55),
+      message: `Fetched ${allEmails.length} emails · page ${page}${reachedLabel}`,
+      current: allEmails.length,
+      total: allEmails.length, // no ceiling known — UI should render counts, not %
+      percent: 0,
     });
     const data = await rateLimitedFetch(apiKey, "/emails", params);
     const items = (data.items || []) as InstantlyEmail[];
@@ -154,11 +173,43 @@ async function fetchEmailsIncremental(
       // request. resolveThread-style dedup makes this safe.
       return { emails: allEmails, outcome, nextCursor: cursor };
     }
-    allEmails.push(...items);
+    // Cutoff filter: walking DESC means the newest items are first, oldest
+    // last. Keep everything above the cutoff, stop once this page's oldest
+    // item falls below it (marking backfill complete for this cutoff).
+    let cutoffReached = false;
+    if (cutoffDate) {
+      const kept: InstantlyEmail[] = [];
+      for (const e of items) {
+        const ts = e.timestamp_created ? new Date(e.timestamp_created) : null;
+        if (ts && ts < cutoffDate) {
+          cutoffReached = true;
+          continue;
+        }
+        kept.push(e);
+        if (ts && (!oldestReached || ts < oldestReached)) oldestReached = ts;
+      }
+      allEmails.push(...kept);
+    } else {
+      allEmails.push(...items);
+      for (const e of items) {
+        const ts = e.timestamp_created ? new Date(e.timestamp_created) : null;
+        if (ts && (!oldestReached || ts < oldestReached)) oldestReached = ts;
+      }
+    }
 
     const newInPage = items.filter((e) => !existingIds.has(e.id)).length;
-    const pctNew = newInPage / items.length;
-    console.log(`[sync] Page ${page}: ${items.length} emails, ${newInPage} new (${Math.round(pctNew * 100)}%) — total fetched: ${allEmails.length}`);
+    const pctNew = items.length ? newInPage / items.length : 0;
+    console.log(`[sync] Page ${page}: ${items.length} emails, ${newInPage} new (${Math.round(pctNew * 100)}%) — total fetched: ${allEmails.length}${cutoffReached ? " (cutoff reached)" : ""}`);
+
+    if (cutoffReached) {
+      // At least one email on this page was older than the cutoff → we've
+      // walked to the user's configured backfill horizon. Mark as reached_end
+      // so the outer caller sets backfillComplete=true. The next sync will
+      // delta-sync from newest with early-termination on.
+      console.log(`[sync] Cutoff reached at page ${page}; backfill for this cutoff is complete`);
+      outcome = "reached_end";
+      break;
+    }
 
     // Early termination — only safe after a full historical backfill. Before
     // that, the "mostly-old" pattern fires on page 2 for accounts that have
@@ -179,7 +230,7 @@ async function fetchEmailsIncremental(
     if (!cursor) break;
   }
 
-  return { emails: allEmails, outcome, nextCursor: cursor };
+  return { emails: allEmails, outcome, nextCursor: cursor, oldestReached };
 }
 
 async function fetchCampaigns(apiKey: string): Promise<Map<string, string>> {
@@ -281,14 +332,14 @@ export async function syncInstantly(
   console.log(`[sync] Starting Instantly sync for integration ${integrationId}`);
   await updateSyncProgress(integrationId, {
     stage: "starting",
-    message: "Starting Instantly sync",
-    percent: 2,
+    message: "Starting sync",
+    percent: 0,
   });
 
   await updateSyncProgress(integrationId, {
     stage: "fetching_campaigns",
     message: "Loading campaigns",
-    percent: 5,
+    percent: 0,
   });
   const campaignMap = await fetchCampaigns(apiKey);
   console.log(`[sync] Found ${campaignMap.size} campaigns`);
@@ -337,7 +388,18 @@ export async function syncInstantly(
   const backfillComplete = config.instantlyBackfillComplete === true;
   const resumeCursor = config.instantlyBackfillCursor as string | undefined;
 
-  const { emails, outcome, nextCursor } = await fetchEmailsIncremental(
+  // Backfill horizon. Defaults to 2026-01-01 so new accounts don't spend
+  // days walking pre-2026 history that may not be needed. User can expand
+  // the horizon via the "Expand history" action which clears this value
+  // (or sets it further back) and un-flags backfillComplete so a resync
+  // continues past the previous stopping point.
+  const cutoffIso = (config.backfillCutoffDate as string | undefined) ?? "2026-01-01T00:00:00.000Z";
+  const cutoffDate = cutoffIso ? new Date(cutoffIso) : undefined;
+  if (cutoffDate) {
+    console.log(`[sync] Backfill cutoff: ${cutoffDate.toISOString()} (leads older than this are skipped)`);
+  }
+
+  const { emails, outcome, nextCursor, oldestReached } = await fetchEmailsIncremental(
     integrationId,
     apiKey,
     existingIds as Set<string>,
@@ -345,8 +407,9 @@ export async function syncInstantly(
     startTime,
     resumeCursor,
     backfillComplete,
+    cutoffDate,
   );
-  console.log(`[sync] Fetched ${emails.length} emails from Instantly (outcome: ${outcome}${resumeCursor ? ", resumed" : ""})`);
+  console.log(`[sync] Fetched ${emails.length} emails from Instantly (outcome: ${outcome}${resumeCursor ? ", resumed" : ""}${oldestReached ? `, oldest ${oldestReached.toISOString()}` : ""})`);
 
   // Sort newest-first so the most recent data appears immediately.
   // The thread resolver handles out-of-order processing correctly
@@ -364,12 +427,16 @@ export async function syncInstantly(
   let skipped = emails.length - newEmails.length;
   let errors = 0;
 
+  // Processing progress uses a real denominator (newEmails.length), so here
+  // we CAN show a meaningful percent — it's the % of THIS run's processing
+  // pass, not the overall backfill. The UI renders percent only when the
+  // total is non-zero and reasonable.
   await updateSyncProgress(integrationId, {
     stage: "processing",
     message: `Processing ${newEmails.length} new messages`,
     total: newEmails.length,
     current: 0,
-    percent: 60,
+    percent: newEmails.length > 0 ? 0 : 100,
   });
 
   // Process only NEW emails sequentially to maintain thread ordering
@@ -401,19 +468,10 @@ export async function syncInstantly(
         message: `Processed ${synced}/${newEmails.length} messages`,
         current: synced,
         total: newEmails.length,
-        percent: Math.min(
-          60 + Math.floor((synced / Math.max(newEmails.length, 1)) * 30),
-          89,
-        ),
+        percent: Math.floor((synced / newEmails.length) * 100),
       });
     }
   }
-
-  await updateSyncProgress(integrationId, {
-    stage: "finalizing",
-    message: "Finalizing",
-    percent: 95,
-  });
 
   // Persist backfill progress. Re-read config because other writes (progress
   // beats) may have mutated it during this run.
@@ -426,10 +484,18 @@ export async function syncInstantly(
     // Ran out of time mid-walk — resume here next run.
     freshConfig.instantlyBackfillCursor = nextCursor;
   } else if (outcome === "reached_end") {
-    // Walked to the end of Instantly's history. Backfill is complete;
-    // future syncs run in efficient delta mode (early termination on).
+    // Walked to the end of the account OR hit the configured cutoff.
+    // Either way this horizon is complete; future syncs run in delta mode.
     freshConfig.instantlyBackfillComplete = true;
     delete freshConfig.instantlyBackfillCursor;
+  }
+  // Record oldest email date actually reached so the UI can show "synced
+  // back to YYYY-MM-DD" instead of a guess.
+  if (oldestReached) {
+    const prev = freshConfig.instantlyOldestReached as string | undefined;
+    if (!prev || new Date(prev) > oldestReached) {
+      freshConfig.instantlyOldestReached = oldestReached.toISOString();
+    }
   }
   // outcome === "early_terminated" only fires when backfillComplete is
   // already true, so no state change needed.
@@ -440,9 +506,14 @@ export async function syncInstantly(
 
   const elapsed = Math.round((Date.now() - startTime) / 1000);
   console.log(`[sync] Instantly sync complete in ${elapsed}s: ${synced} synced, ${skipped} skipped, ${errors} errors`);
+  const doneMessage = outcome === "time_budget"
+    ? `Synced ${synced} new · paused at ${oldestReached?.toISOString().slice(0, 10) ?? "cursor"} · will resume`
+    : outcome === "reached_end"
+      ? `Synced ${synced} new · reached ${oldestReached?.toISOString().slice(0, 10) ?? "end of history"}`
+      : `Synced ${synced} new messages`;
   await updateSyncProgress(integrationId, {
     stage: "done",
-    message: `Synced ${synced} new messages`,
+    message: doneMessage,
     percent: 100,
   });
   return { synced, skipped, errors };

@@ -22,19 +22,35 @@ export async function PATCH(
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
 
-  const { name } = await req.json();
-  if (!name) {
-    return NextResponse.json({ error: "Name is required" }, { status: 400 });
+  const body = (await req.json()) as {
+    name?: string;
+    autoCreateLabels?: boolean;
+  };
+
+  const data: { name?: string; slug?: string; autoCreateLabels?: boolean } = {};
+
+  if (body.name !== undefined) {
+    if (!body.name) {
+      return NextResponse.json({ error: "Name is required" }, { status: 400 });
+    }
+    data.name = body.name;
+    data.slug = body.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
   }
 
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
+  if (typeof body.autoCreateLabels === "boolean") {
+    data.autoCreateLabels = body.autoCreateLabels;
+  }
+
+  if (Object.keys(data).length === 0) {
+    return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+  }
 
   const workspace = await prisma.workspace.update({
     where: { id },
-    data: { name, slug },
+    data,
   });
 
   return NextResponse.json(workspace);

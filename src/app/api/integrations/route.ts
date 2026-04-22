@@ -6,7 +6,6 @@ import { encrypt, maskApiKey, decrypt } from "@/lib/crypto";
 import { v4 as uuid } from "uuid";
 import { syncInstantly, testInstantlyConnection } from "@/services/instantly-sync";
 import { syncHeyreach, testHeyreachConnection } from "@/services/heyreach-sync";
-import { enrichFromInstantly } from "@/services/lead-enrichment";
 import { STALE_LOCK_MS, type SyncProgress } from "@/services/sync-progress";
 
 // Initial sync + enrichment can take a while for large accounts
@@ -91,6 +90,11 @@ export async function GET(req: NextRequest) {
       enriching: !!config.enrichRunning,
       lastError: (config.lastError as string | undefined) ?? null,
       lastErrorAt: (config.lastErrorAt as string | undefined) ?? null,
+      backfillCutoffDate:
+        (config.backfillCutoffDate as string | undefined) ??
+        (i.provider === "INSTANTLY" ? "2026-01-01T00:00:00.000Z" : null),
+      backfillComplete: !!config.instantlyBackfillComplete,
+      oldestReached: (config.instantlyOldestReached as string | undefined) ?? null,
     };
   });
 
@@ -154,20 +158,15 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Trigger historical sync + enrichment in background (serverless-safe)
+  // Trigger historical sync in background. Enrichment is explicitly NOT run
+  // here — sync+enrich together exceed Vercel's 300s function limit for
+  // large accounts. User can click Enrich once initial sync completes, or
+  // the next cron tick will pick it up.
   after(async () => {
     const syncFn = provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
     try {
       const result = await syncFn(integration.id);
       console.log(`[sync] Initial sync done for ${integration.id}: ${result.synced} synced`);
-      if (provider === "INSTANTLY") {
-        try {
-          const enrichResult = await enrichFromInstantly(integration.id);
-          console.log(`[sync] Auto-enrichment done: ${enrichResult.enriched} enriched, ${enrichResult.imported} imported`);
-        } catch (err) {
-          console.error(`[sync] Auto-enrichment failed:`, err);
-        }
-      }
     } catch (err) {
       console.error(`[sync] Background sync failed for ${integration.id}:`, err);
     }

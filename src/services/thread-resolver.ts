@@ -166,11 +166,21 @@ export async function resolveThread(
     const isNewerThanLast = !thread.lastMessageAt || msgTime > thread.lastMessageAt;
     const shouldUpdateSnippet = snippet.length > 0 && (snippetIsEmpty || isNewerThanLast);
 
+    // Keep Thread.channel aligned with the most recent message's channel.
+    // Without this, a HeyReach-first thread that later gets emails stays
+    // channel=LINKEDIN forever (and vice versa), breaking the Email/LinkedIn
+    // filter which reads Thread.channel. Only flip on messages that are newer
+    // than the previously-seen latest, to avoid out-of-order sync runs
+    // resurrecting an old channel.
+    const shouldUpdateChannel =
+      isNewerThanLast && payload.channel !== thread.channel;
+
     await tx.thread.update({
       where: { id: thread.id },
       data: {
         ...(shouldUpdateSnippet ? { snippet } : {}),
         ...(isNewerThanLast ? { lastMessageAt: msgTime } : {}),
+        ...(shouldUpdateChannel ? { channel: payload.channel } : {}),
         messageCount: { increment: 1 },
         isUnread: payload.direction === "INBOUND" ? true : undefined,
       },

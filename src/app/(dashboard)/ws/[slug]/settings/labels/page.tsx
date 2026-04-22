@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
+import { useCurrentWorkspace, useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -43,12 +45,14 @@ function headers(wId: string) {
 
 export default function LabelsPage() {
   const workspaceId = useCurrentWorkspaceId();
+  const workspace = useCurrentWorkspace() as { id: string; autoCreateLabels?: boolean } | null;
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"create" | "edit">("create");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [color, setColor] = useState(PRESET_COLORS[0]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const { data: labels, isLoading } = useQuery({
     queryKey: ["labels", workspaceId],
@@ -61,6 +65,27 @@ export default function LabelsPage() {
     },
     enabled: !!workspaceId,
   });
+
+  const selectableIds = useMemo<string[]>(
+    () => (labels as LabelRow[] | undefined ?? []).filter((l) => !l.isSystem).map((l) => l.id),
+    [labels],
+  );
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+  const someSelected = selected.size > 0;
+
+  const toggleAll = () => {
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(selectableIds));
+  };
+
+  const toggleRow = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const resetForm = () => {
     setMode("create");
@@ -141,6 +166,50 @@ export default function LabelsPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
+  const bulkDelete = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const res = await fetch("/api/labels/bulk-delete", {
+        method: "POST",
+        headers: headers(workspaceId!),
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Bulk delete failed");
+      }
+      return res.json() as Promise<{ deleted: number; skipped: number }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["labels"] });
+      setSelected(new Set());
+      const msg = data.skipped > 0
+        ? `${data.deleted} deleted · ${data.skipped} skipped (system labels)`
+        : `${data.deleted} label${data.deleted === 1 ? "" : "s"} deleted`;
+      toast.success(msg);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const toggleAutoCreate = useMutation({
+    mutationFn: async (next: boolean) => {
+      if (!workspace?.id) throw new Error("No workspace");
+      const res = await fetch(`/api/workspaces/${workspace.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoCreateLabels: next }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to update setting");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   const handleDelete = (label: LabelRow) => {
     const count = label._count.threadLabels;
     const warning =
@@ -151,12 +220,21 @@ export default function LabelsPage() {
     deleteLabel.mutate(label.id);
   };
 
+  const handleBulkDelete = () => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    const msg = `Delete ${ids.length} label${ids.length === 1 ? "" : "s"}? All thread assignments for these labels will be removed.`;
+    if (typeof window !== "undefined" && !window.confirm(msg)) return;
+    bulkDelete.mutate(ids);
+  };
+
   const handleSubmit = () => {
     if (mode === "edit") updateLabel.mutate();
     else createLabel.mutate();
   };
 
   const isSubmitting = createLabel.isPending || updateLabel.isPending;
+  const autoCreateLabels = workspace?.autoCreateLabels ?? true;
 
   return (
     <div className="max-w-3xl">
@@ -167,10 +245,46 @@ export default function LabelsPage() {
             Manage labels for categorizing conversations
           </p>
         </div>
-        <Button onClick={openCreate} className="gap-1">
-          <Plus className="h-4 w-4" />
-          Add Label
-        </Button>
+        <div className="flex items-center gap-2">
+          {someSelected && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleBulkDelete}
+              disabled={bulkDelete.isPending}
+              className="gap-1"
+            >
+              {bulkDelete.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              Delete {selected.size} selected
+            </Button>
+          )}
+          <Button onClick={openCreate} className="gap-1">
+            <Plus className="h-4 w-4" />
+            Add Label
+          </Button>
+        </div>
+      </div>
+
+      <div className="mb-4 flex items-start justify-between gap-4 rounded-md border border-border bg-muted/30 px-3 py-2.5">
+        <label htmlFor="auto-create-labels" className="flex-1 cursor-pointer select-none">
+          <div className="text-sm font-medium">
+            Auto-create labels from Instantly / HeyReach tags
+          </div>
+          <div className="text-xs text-muted-foreground">
+            When enabled (default), any new tag coming in from Instantly or HeyReach becomes a Leadbox label automatically. Turn off to keep a curated list — unknown tags will be skipped silently.
+          </div>
+        </label>
+        <Switch
+          id="auto-create-labels"
+          checked={autoCreateLabels}
+          onCheckedChange={(v: boolean) => toggleAutoCreate.mutate(v)}
+          disabled={toggleAutoCreate.isPending}
+          className="mt-0.5 shrink-0"
+        />
       </div>
 
       <Dialog
@@ -239,6 +353,14 @@ export default function LabelsPage() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
+                <TableHead className="w-[44px] pr-0">
+                  <Checkbox
+                    checked={allSelected}
+                    onCheckedChange={toggleAll}
+                    disabled={selectableIds.length === 0}
+                    aria-label="Select all custom labels"
+                  />
+                </TableHead>
                 <TableHead>Label</TableHead>
                 <TableHead className="w-[120px]">Type</TableHead>
                 <TableHead className="w-[100px]">Threads</TableHead>
@@ -250,6 +372,14 @@ export default function LabelsPage() {
                 const deleting = deleteLabel.isPending && deleteLabel.variables === label.id;
                 return (
                   <TableRow key={label.id} className="group">
+                    <TableCell className="pr-0">
+                      <Checkbox
+                        checked={selected.has(label.id)}
+                        onCheckedChange={() => toggleRow(label.id)}
+                        disabled={label.isSystem}
+                        aria-label={`Select ${label.name}`}
+                      />
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <span
@@ -290,8 +420,8 @@ export default function LabelsPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleDelete(label)}
-                          disabled={deleting}
-                          title="Delete label"
+                          disabled={deleting || label.isSystem}
+                          title={label.isSystem ? "System labels cannot be deleted" : "Delete label"}
                           className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                         >
                           {deleting ? (

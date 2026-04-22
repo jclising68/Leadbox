@@ -3,7 +3,9 @@ import { decrypt } from "@/lib/crypto";
 import { updateSyncProgress } from "@/services/sync-progress";
 
 const INSTANTLY_API_BASE = "https://api.instantly.ai/api/v2";
-const MIN_REQUEST_GAP_MS = 1000; // Match sync rate — 1 req/sec is safely under Instantly v2 limits
+// 10 req/s — matches instantly-sync.ts pacing. See comment there for the
+// direct-probe evidence. 429 backoff retains the safety net.
+const MIN_REQUEST_GAP_MS = 100;
 
 // Per-API-key rate limiter state. Using a Map (instead of a single
 // `lastRequestTime` global) lets multiple workspaces' enrichments run in
@@ -295,7 +297,16 @@ export async function enrichFromInstantly(
   const apiKey = decrypt(integration.apiKeyEncrypted, integration.apiKeyIv, integration.apiKeyTag);
   const workspaceId = integration.workspaceId;
 
-  console.log(`[enrich] Starting enrichment for integration ${integrationId} (budget: ${Math.round(timeBudgetMs / 1000)}s)`);
+  // Workspace setting: when autoCreateLabels=false, skip labels that don't
+  // already exist instead of auto-creating them on the fly. Lets the user
+  // keep a curated label list without Instantly tags flooding in.
+  const workspace = await prisma.workspace.findUniqueOrThrow({
+    where: { id: workspaceId },
+    select: { autoCreateLabels: true },
+  });
+  const autoCreateLabels = workspace.autoCreateLabels;
+
+  console.log(`[enrich] Starting enrichment for integration ${integrationId} (budget: ${Math.round(timeBudgetMs / 1000)}s, autoCreateLabels=${autoCreateLabels})`);
   await updateSyncProgress(integrationId, {
     stage: "enriching_start",
     message: "Starting lead enrichment",
@@ -561,12 +572,24 @@ export async function enrichFromInstantly(
           for (const [lowerKey, labelName] of labelsToApply) {
             let label = labelByName.get(lowerKey);
             if (!label) {
-              label = await prisma.label.upsert({
-                where: { workspaceId_name: { workspaceId, name: labelName } },
-                create: { workspaceId, name: labelName, color: colorForStatus(labelName) },
-                update: {},
-                select: { id: true, name: true },
-              });
+              if (!autoCreateLabels) {
+                // Workspace has opted out of auto-label creation. Try a
+                // findUnique so a newly-manually-created label still gets
+                // picked up, but never create one here.
+                const found = await prisma.label.findUnique({
+                  where: { workspaceId_name: { workspaceId, name: labelName } },
+                  select: { id: true, name: true },
+                });
+                if (!found) continue;
+                label = found;
+              } else {
+                label = await prisma.label.upsert({
+                  where: { workspaceId_name: { workspaceId, name: labelName } },
+                  create: { workspaceId, name: labelName, color: colorForStatus(labelName) },
+                  update: {},
+                  select: { id: true, name: true },
+                });
+              }
               labelByName.set(lowerKey, label);
             }
             await prisma.threadLabel.upsert({

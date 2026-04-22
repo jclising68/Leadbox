@@ -133,23 +133,22 @@ export async function GET(req: NextRequest) {
     where.domain = domainFilter;
   }
 
-  // Message-level filters (channel, hasReply) share a single `some` clause so
-  // they apply to the *same* message — a thread appears under the Email tab
-  // only if it has an email message, and under "Has reply" only if a message
-  // is inbound. Prior code filtered on `Thread.channel`, which is captured
-  // once at creation and never updated, so HeyReach-first prospects hid their
-  // later Instantly emails under LINKEDIN forever.
-  const threadMessageConditions: Prisma.MessageWhereInput[] = [];
+  // Channel uses Thread.channel so the filter matches the row's primary
+  // channel (icon users see). Earlier message-level filtering caused stray
+  // stub messages of one channel to drag a thread into the wrong filter. The
+  // thread-resolver now updates Thread.channel on every new message so
+  // multi-channel threads keep this field accurate.
   if (channelFilter) {
-    threadMessageConditions.push({ channel: channelFilter as "EMAIL" | "LINKEDIN" });
-  }
-  if (hasReply === "true") {
-    threadMessageConditions.push({ direction: "INBOUND" });
-  }
-  if (threadMessageConditions.length > 0) {
     where.thread = {
       ...(where.thread as Prisma.ThreadWhereInput),
-      messages: { some: { AND: threadMessageConditions } },
+      channel: channelFilter as "EMAIL" | "LINKEDIN",
+    };
+  }
+  // hasReply stays message-level — pure existence check for an inbound message.
+  if (hasReply === "true") {
+    where.thread = {
+      ...(where.thread as Prisma.ThreadWhereInput),
+      messages: { some: { direction: "INBOUND" } },
     };
   }
 

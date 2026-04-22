@@ -65,6 +65,10 @@ model Workspace {
   openaiKey    String?           // Encrypted OpenAI API key
   openaiKeyIv  String?
   openaiKeyTag String?
+  // When true (default), enrichment + webhook handlers auto-create a Label
+  // for any unknown tag they encounter from Instantly/HeyReach. When false,
+  // unknown tags are silently skipped — labels must be created manually.
+  autoCreateLabels Boolean       @default(true)
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   members      WorkspaceMember[]

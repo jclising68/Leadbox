@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
-import { enrichFromInstantly } from "@/services/lead-enrichment";
 import { markSyncStartedFresh, STALE_LOCK_MS, updateSyncProgress } from "@/services/sync-progress";
 import { after } from "next/server";
 import { workspaceJson } from "@/lib/api-response";
@@ -103,21 +102,17 @@ export async function POST(
     const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
     let syncError: string | null = null;
     try {
+      // Manual Sync runs ONLY the sync phase. Enrichment is triggered
+      // explicitly by the user (via the Enrich button → /api/integrations/
+      // [id]/enrich) or by cron. Previously this route also called
+      // enrichFromInstantly() inline, but sync(250s) + enrich(120s) = 370s
+      // exceeded Vercel's 300s function limit, so enrichment consistently
+      // died mid-run at 2% and stuck the lock.
       const result = await syncFn(integration.id);
       console.log(`[sync] Completed for ${id}: ${result.synced} synced, ${result.skipped} skipped, ${result.errors} errors`);
 
-      // Auto-run enrichment after Instantly sync
-      if (integration.provider === "INSTANTLY") {
-        console.log(`[sync] Starting auto-enrichment for ${id}...`);
-        try {
-          const enrichResult = await enrichFromInstantly(integration.id);
-          console.log(`[sync] Auto-enrichment done for ${id}: ${enrichResult.enriched} enriched, ${enrichResult.imported} imported`);
-        } catch (err) {
-          console.error(`[sync] Auto-enrichment failed for ${id}:`, err instanceof Error ? err.message : err);
-        }
-      }
-
-      // Auto-archive threads older than 2026-01-01
+      // Auto-archive threads older than 2026-01-01 — preserves existing
+      // behavior of collapsing ancient inbox state after a fresh sync.
       try {
         const archived = await prisma.thread.updateMany({
           where: {

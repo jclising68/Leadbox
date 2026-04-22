@@ -296,6 +296,9 @@ export default function IntegrationsPage() {
                 total?: number;
                 updatedAt: string;
               } | null;
+              backfillCutoffDate?: string | null;
+              backfillComplete?: boolean;
+              oldestReached?: string | null;
             }) => (
               <Card key={int.id} className={!int.isActive ? "opacity-70" : ""}>
                 <CardHeader className="pb-3">
@@ -340,7 +343,18 @@ export default function IntegrationsPage() {
                         variant="outline"
                         size="sm"
                         onClick={() => enrichMutation.mutate(int.id)}
-                        disabled={enrichingIds.has(int.id) || int.enriching || !int.isActive}
+                        disabled={
+                          enrichingIds.has(int.id) ||
+                          int.enriching ||
+                          (int.syncing && !int.syncStuck) ||
+                          syncingIds.has(int.id) ||
+                          !int.isActive
+                        }
+                        title={
+                          int.syncing && !int.syncStuck
+                            ? "Enrichment will be available once sync finishes"
+                            : undefined
+                        }
                       >
                         {enrichingIds.has(int.id) || int.enriching ? (
                           <Loader2 className="h-3 w-3 animate-spin mr-1" />
@@ -420,23 +434,76 @@ export default function IntegrationsPage() {
                       </button>
                     </div>
                   )}
-                  {int.syncing && int.syncProgress && (
-                    <div className="mt-2 rounded-md border border-primary/20 bg-primary/5 px-2.5 py-1.5">
-                      <div className="flex items-center justify-between text-xs text-foreground mb-1">
-                        <span className="flex items-center gap-1.5 min-w-0">
-                          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
-                          <span className="truncate">{int.syncProgress.message}</span>
-                        </span>
-                        <span className="tabular-nums text-muted-foreground shrink-0 ml-2">
-                          {Math.round(int.syncProgress.percent)}%
-                        </span>
+                  {int.syncing && int.syncProgress && (() => {
+                    // Honest progress: only render a % bar when the current
+                    // stage reports a real denominator (processing phase,
+                    // which knows how many new emails are queued). Fetching
+                    // pages has no known total — show counts + last-update
+                    // timestamp instead of inventing a number.
+                    const p = int.syncProgress;
+                    const hasRealTotal =
+                      typeof p.total === "number" &&
+                      p.total > 0 &&
+                      typeof p.current === "number" &&
+                      p.stage === "processing";
+                    const realPct = hasRealTotal
+                      ? Math.min(100, Math.floor((p.current! / p.total!) * 100))
+                      : null;
+                    return (
+                      <div className="mt-2 rounded-md border border-primary/20 bg-primary/5 px-2.5 py-1.5">
+                        <div className="flex items-center justify-between text-xs text-foreground mb-1">
+                          <span className="flex items-center gap-1.5 min-w-0">
+                            <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                            <span className="truncate">{p.message}</span>
+                          </span>
+                          {realPct !== null && (
+                            <span className="tabular-nums text-muted-foreground shrink-0 ml-2">
+                              {realPct}%
+                            </span>
+                          )}
+                        </div>
+                        {realPct !== null ? (
+                          <div className="h-1 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-primary transition-all duration-300"
+                              style={{ width: `${realPct}%` }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-muted-foreground">
+                            Updated {new Date(p.updatedAt).toLocaleTimeString()}
+                          </div>
+                        )}
                       </div>
-                      <div className="h-1 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary transition-all duration-300"
-                          style={{ width: `${Math.min(Math.max(int.syncProgress.percent, 2), 100)}%` }}
-                        />
-                      </div>
+                    );
+                  })()}
+                  {!int.syncing && int.provider === "INSTANTLY" && int.backfillCutoffDate && (
+                    <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+                      <span className="truncate">
+                        {int.backfillComplete ? "Backfilled" : "Backfilling"} back to{" "}
+                        <span className="font-medium text-foreground">
+                          {new Date(int.backfillCutoffDate).toISOString().slice(0, 10)}
+                        </span>
+                        {int.oldestReached && (
+                          <> · reached {new Date(int.oldestReached).toISOString().slice(0, 10)}</>
+                        )}
+                      </span>
+                      {int.backfillComplete &&
+                        new Date(int.backfillCutoffDate) >= new Date("2026-01-01T00:00:00.000Z") && (
+                          <button
+                            onClick={async () => {
+                              await patchMutation.mutateAsync({
+                                id: int.id,
+                                body: { expandBackfillTo: "2025-01-01T00:00:00.000Z" },
+                              });
+                              syncMutation.mutate(int.id);
+                            }}
+                            disabled={patchMutation.isPending}
+                            className="shrink-0 text-[11px] underline hover:opacity-80"
+                          >
+                            Expand to 2025
+                          </button>
+                        )}
                     </div>
                   )}
                 </CardHeader>
