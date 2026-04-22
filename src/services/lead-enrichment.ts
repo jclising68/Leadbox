@@ -11,22 +11,22 @@ const MIN_REQUEST_GAP_MS = 1000; // Match sync rate — 1 req/sec is safely unde
 // API key — each Instantly account has its own quota anyway.
 const lastRequestByKey = new Map<string, number>();
 
-// Instantly `lt_interest_status` mapping.
-//
-// Reference: https://developer.instantly.ai — confirmed against /leads/list
-// responses in production. Positive values are "soft" (the lead expressed
-// interest), negatives are "hard" (won't proceed). `0` means "not set" and
-// must NOT be mapped (was previously mis-mapped to "Not Interested", which
-// would have flooded the inbox once the guard was relaxed).
+// Instantly `lt_interest_status` mapping — matches Instantly v2 docs exactly.
+// Earlier version treated 0 as "not set" and silently dropped it, but 0
+// actually means "Out of Office" per the API, which is why reply-generated
+// auto-classifications like Mike McDonough's never made it to Leadbox.
+// Leads that were never classified come back as -29998 (or null) instead,
+// not 0, so we can safely map every documented code.
 const INTEREST_STATUS_MAP: Record<number, string> = {
+  0: "Out of Office",
   1: "Interested",
   2: "Meeting Booked",
   3: "Meeting Completed",
-  4: "Closed",
+  4: "Won",
   [-1]: "Not Interested",
   [-2]: "Wrong Person",
   [-3]: "Lost",
-  [-4]: "Out of Office",
+  [-4]: "No Show",
 };
 
 // Pick a sensible default color for an auto-created label based on its name.
@@ -405,14 +405,16 @@ export async function enrichFromInstantly(
         const emailLower = lead.email.toLowerCase();
         const existing = prospectByEmail.get(emailLower);
 
-        // Map interest status
+        // Map interest status. 0 is "Out of Office" in Instantly's v2 enum;
+        // "never classified" leads come back as -29998 or null, not 0.
         const rawInterest = lead.lt_interest_status;
         const interestLabel =
-          rawInterest !== undefined && rawInterest !== null && rawInterest !== 0
+          rawInterest !== undefined && rawInterest !== null
             ? INTEREST_STATUS_MAP[rawInterest]
             : undefined;
-        if (rawInterest !== undefined && rawInterest !== null && rawInterest !== 0 && !interestLabel) {
-          console.warn(`[enrich] Unknown lt_interest_status=${rawInterest} for ${lead.email}`);
+        if (rawInterest !== undefined && rawInterest !== null && !interestLabel) {
+          // Unmapped code (e.g. -29998 sentinel for "never classified") —
+          // expected, don't spam warnings.
         }
         const statusLabel =
           interestLabel || getCampaignStatus(lead.status, lead.email_reply_count);
