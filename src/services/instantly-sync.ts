@@ -136,8 +136,24 @@ async function fetchEmailsIncremental(
     });
     const data = await rateLimitedFetch(apiKey, "/emails", params);
     const items = (data.items || []) as InstantlyEmail[];
+    const apiCursor = data.next_starting_after as string | undefined;
 
-    if (items.length === 0) break;
+    if (items.length === 0) {
+      // Distinguish genuine empty-account from an API hiccup mid-walk.
+      // Only the first page with no resume cursor can be a true "no emails"
+      // signal. Any other empty page is Instantly's /emails endpoint briefly
+      // returning nothing for a live cursor — previously we'd treat it as
+      // end-of-history, flip backfillComplete=true, clear the cursor and
+      // permanently lose the rest of the account's history. Now we preserve
+      // the cursor and exit as a time-budget so the next run retries.
+      if (page === 1 && !resumeCursor) break;
+      console.log(`[sync] Empty items page mid-walk (cursor=${(cursor ?? "").slice(0, 8)}...) — preserving cursor for next run`);
+      outcome = "time_budget";
+      // Preserve the cursor we USED to fetch this empty page (not apiCursor,
+      // which would be undefined here) so the next run retries the same
+      // request. resolveThread-style dedup makes this safe.
+      return { emails: allEmails, outcome, nextCursor: cursor };
+    }
     allEmails.push(...items);
 
     const newInPage = items.filter((e) => !existingIds.has(e.id)).length;
@@ -154,8 +170,8 @@ async function fetchEmailsIncremental(
       break;
     }
 
-    cursor = data.next_starting_after as string | undefined;
-    // Only the absent cursor signals end-of-history. A partial page
+    cursor = apiCursor;
+    // Only the absent cursor signals true end-of-history. A partial page
     // (items.length < PAGE_SIZE) can happen mid-walk when Instantly's
     // response size limits or filter modes trim a page — breaking on it
     // used to end the backfill prematurely and flip `backfillComplete=true`
@@ -300,6 +316,24 @@ export async function syncInstantly(
   // Instantly's history, `backfillComplete` goes true and future syncs use
   // delta mode (early termination) for efficiency.
   const config = ((integration.config as Record<string, unknown>) ?? {});
+
+  // One-time auto-heal: a previous version of this sync could flip
+  // instantlyBackfillComplete=true on an empty-page API hiccup before truly
+  // reaching end-of-history, permanently stranding older emails. Clear the
+  // flag once per integration so they re-walk with the fixed logic. After
+  // this heal runs, the fixed empty-page handling ensures the flag only
+  // flips when next_starting_after === null (true end-of-history).
+  if (config.instantlyBackfillComplete && !config.instantlyBackfillHealedV2) {
+    console.log(`[sync] Auto-healing stale backfillComplete flag for integration ${integrationId}`);
+    config.instantlyBackfillComplete = false;
+    config.instantlyBackfillHealedV2 = true;
+    delete config.instantlyBackfillCursor;
+    await prisma.integration.update({
+      where: { id: integrationId },
+      data: { config: config as object },
+    });
+  }
+
   const backfillComplete = config.instantlyBackfillComplete === true;
   const resumeCursor = config.instantlyBackfillCursor as string | undefined;
 

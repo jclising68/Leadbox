@@ -321,6 +321,49 @@ export async function enrichFromInstantly(
     console.warn(`[enrich] Failed to load custom tags (continuing without):`, err instanceof Error ? err.message : err);
   }
 
+  // 1c. Build reverse tag index: emailLower → Set<tagName>. Instantly's
+  // /leads/list response does NOT carry custom_tag_ids on each lead object
+  // (verified by direct API probe), but /leads/list DOES accept
+  // `custom_tag_ids` as a filter param, returning only leads carrying that
+  // tag. So we iterate each tag once and assemble the membership map upfront.
+  // This replaces the previous (broken) approach of reading lead.custom_tag_ids.
+  const emailToTagNames = new Map<string, Set<string>>();
+  const TAG_MAX_PAGES_PER_TAG = 20; // cap per tag → 2,000 leads max; keeps worst-case bounded
+  const TAG_MAP_BUDGET_FRACTION = 0.25; // reserve first 25% of time for tag resolution
+  const tagMapStart = Date.now();
+  for (const [tagId, tagName] of customTagById) {
+    if (Date.now() - startTime > timeBudgetMs * TAG_MAP_BUDGET_FRACTION) {
+      console.warn(`[enrich] Tag-map phase hit ${Math.round(TAG_MAP_BUDGET_FRACTION * 100)}% budget; remaining tags deferred to next run`);
+      break;
+    }
+    let tagCursor: string | undefined;
+    let tagPages = 0;
+    while (tagPages < TAG_MAX_PAGES_PER_TAG) {
+      try {
+        const page = await rateLimitedPost(apiKey, "/leads/list", {
+          limit: 100,
+          custom_tag_ids: [tagId],
+          ...(tagCursor ? { starting_after: tagCursor } : {}),
+        });
+        const items = (page.items ?? []) as InstantlyLead[];
+        tagPages++;
+        for (const l of items) {
+          if (!l.email) continue;
+          const key = l.email.toLowerCase();
+          let set = emailToTagNames.get(key);
+          if (!set) { set = new Set(); emailToTagNames.set(key, set); }
+          set.add(tagName);
+        }
+        tagCursor = page.next_starting_after as string | undefined;
+        if (!tagCursor) break;
+      } catch (err) {
+        console.warn(`[enrich] Tag lookup failed for "${tagName}":`, err instanceof Error ? err.message : err);
+        break;
+      }
+    }
+  }
+  console.log(`[enrich] Tag map built in ${Math.round((Date.now() - tagMapStart) / 1000)}s: ${emailToTagNames.size} leads across ${customTagById.size} tag(s)`);
+
   // 2. Pre-fetch workspace labels.
   const allLabels = await prisma.label.findMany({
     where: { workspaceId },
@@ -361,7 +404,14 @@ export async function enrichFromInstantly(
   //    - If prospect exists in DB → update (enrich)
   //    - If prospect is new AND the lead has replied or been tagged → create (import)
   //    Over multiple cron cycles the cursor progresses through the full list.
-  let cursor: string | undefined;
+  //    Cursor persists in integration.config.instantlyEnrichmentCursor so
+  //    repeated runs cover the full lead space instead of restarting at the
+  //    top each time (previously a known coverage gap for large accounts).
+  const config = ((integration.config as Record<string, unknown>) ?? {});
+  let cursor: string | undefined = config.instantlyEnrichmentCursor as string | undefined;
+  if (cursor) {
+    console.log(`[enrich] Resuming from saved cursor ${cursor.slice(0, 8)}...`);
+  }
   let enriched = 0;
   let imported = 0;
   let errors = 0;
@@ -419,10 +469,11 @@ export async function enrichFromInstantly(
         const statusLabel =
           interestLabel || getCampaignStatus(lead.status, lead.email_reply_count);
 
-        // Resolve custom tags
-        const customTagLabels = (lead.custom_tag_ids ?? [])
-          .map((id) => customTagById.get(id))
-          .filter((name): name is string => !!name);
+        // Resolve custom tags via the reverse index built earlier. Instantly's
+        // /leads/list doesn't surface custom_tag_ids per lead, so the only
+        // authoritative source is the email-keyed map assembled from
+        // filter queries against each tag.
+        const customTagLabels = Array.from(emailToTagNames.get(emailLower) ?? []);
 
         // Build update data
         const updateData = buildUpdateData(
@@ -543,6 +594,24 @@ export async function enrichFromInstantly(
   if (Date.now() - startTime >= timeBudgetMs) {
     console.log(`[enrich] Time budget exhausted at page ${pages}, ${processed} leads processed — will continue next cycle`);
   }
+
+  // Persist cursor so the next run picks up where this one stopped. When the
+  // full list has been walked (cursor is null), clear it so the next run
+  // starts fresh at the top of the list (picks up newly added leads).
+  const freshRow = await prisma.integration.findUnique({
+    where: { id: integrationId },
+    select: { config: true },
+  });
+  const freshConfig = ((freshRow?.config as Record<string, unknown>) ?? {});
+  if (cursor) {
+    freshConfig.instantlyEnrichmentCursor = cursor;
+  } else {
+    delete freshConfig.instantlyEnrichmentCursor;
+  }
+  await prisma.integration.update({
+    where: { id: integrationId },
+    data: { config: freshConfig as object },
+  });
 
   console.log(`[enrich] Done: ${enriched} enriched, ${imported} imported, ${campaigns.length} campaigns, ${errors} errors`);
   await updateSyncProgress(integrationId, {

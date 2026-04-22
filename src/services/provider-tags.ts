@@ -172,7 +172,15 @@ async function pushInstantlyTags(apiKey: string, email: string, desired: string[
   if (!lead) {
     throw new Error(`lead not found in Instantly for email ${email}`);
   }
-  const currentTagIds = new Set(lead.custom_tag_ids ?? []);
+  // IMPORTANT: Instantly's /leads/list does NOT return custom_tag_ids on the
+  // lead object (verified by direct API probe). That makes it impossible to
+  // know the lead's current tag set from this endpoint, so we cannot safely
+  // diff-and-delete — a deletion pass here would strip every Instantly tag
+  // off the lead. Treat this push as ADDITIVE-ONLY: we assign the desired
+  // tags and never remove anything. Removing a label in Leadbox will
+  // therefore keep the tag on the Instantly side (by design, safer than
+  // wiping user data). If Instantly later exposes a per-lead tag endpoint
+  // we can re-introduce the remove path.
 
   // 2. Resolve desired label names to tag IDs, creating any that are missing.
   const tagsList = await instantlyFetch(apiKey, "/custom-tags?limit=100", {
@@ -196,29 +204,17 @@ async function pushInstantlyTags(apiKey: string, email: string, desired: string[
     desiredIds.add(id);
   }
 
-  // 3. Diff and apply.
-  const toAdd = [...desiredIds].filter((id) => !currentTagIds.has(id));
-  const toRemove = [...currentTagIds].filter((id) => !desiredIds.has(id));
-
-  if (toAdd.length) {
+  // 3. Additive apply — assign all desired tags. Instantly's toggle-resource
+  // with assign:true is idempotent for already-assigned tags, so re-sending
+  // the full desired set is safe.
+  if (desiredIds.size) {
     await instantlyFetch(apiKey, "/custom-tags/toggle-resource", {
       method: "POST",
       body: JSON.stringify({
-        tag_ids: toAdd,
+        tag_ids: [...desiredIds],
         resource_ids: [lead.id],
         resource_type: 1, // 1 = lead
         assign: true,
-      }),
-    });
-  }
-  if (toRemove.length) {
-    await instantlyFetch(apiKey, "/custom-tags/toggle-resource", {
-      method: "POST",
-      body: JSON.stringify({
-        tag_ids: toRemove,
-        resource_ids: [lead.id],
-        resource_type: 1,
-        assign: false,
       }),
     });
   }
