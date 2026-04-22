@@ -70,13 +70,22 @@ function NavLink({
       href={href}
       title={collapsed ? item.label : undefined}
       className={cn(
-        "flex items-center gap-3 rounded-md transition-colors",
+        "relative flex items-center gap-3 rounded-md transition-colors",
         collapsed ? "justify-center w-9 h-9" : "px-3 h-9",
         active
           ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-          : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
       )}
     >
+      {active && (
+        <span
+          aria-hidden
+          className={cn(
+            "absolute rounded-full bg-brand-blue",
+            collapsed ? "bottom-1 left-1/2 h-0.5 w-4 -translate-x-1/2" : "left-0 top-1.5 bottom-1.5 w-0.5"
+          )}
+        />
+      )}
       <item.icon className="h-4 w-4 shrink-0" />
       {!collapsed && <span className="text-sm truncate">{item.label}</span>}
     </Link>

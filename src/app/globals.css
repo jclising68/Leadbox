@@ -7,9 +7,13 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-sans: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-heading: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-gold: var(--brand-gold);
+  --color-brand-red: var(--brand-red);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -68,7 +72,8 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.91 0.004 260);
   --input: oklch(0.91 0.004 260);
-  --ring: oklch(0.65 0.01 260);
+  /* Focus ring uses brand blue — every keyboard focus reinforces the brand */
+  --ring: oklch(0.62 0.14 240);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -79,10 +84,16 @@
   --sidebar-foreground: oklch(0.16 0.01 260);
   --sidebar-primary: oklch(0.22 0.015 260);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.95 0.004 260);
-  --sidebar-accent-foreground: oklch(0.22 0.015 260);
+  /* Tinted brand-blue wash for active nav rows (light mode) */
+  --sidebar-accent: oklch(0.955 0.03 240);
+  --sidebar-accent-foreground: oklch(0.50 0.15 240);
   --sidebar-border: oklch(0.91 0.004 260);
-  --sidebar-ring: oklch(0.65 0.01 260);
+  --sidebar-ring: oklch(0.62 0.14 240);
+
+  /* Lead Assassin brand accents — sampled from leadassassin.com */
+  --brand-blue: #3b82c4;
+  --brand-gold: #e8a838;
+  --brand-red: #d93b3b;
 }
 
 .dark {
@@ -106,7 +117,7 @@
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.62 0.01 255);
+  --ring: oklch(0.68 0.14 240);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -114,12 +125,18 @@
   --chart-5: oklch(0.269 0 0);
   --sidebar: oklch(0.145 0.006 255);
   --sidebar-foreground: oklch(0.96 0.003 255);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.96 0.003 255);
-  --sidebar-accent: oklch(0.22 0.006 255);
-  --sidebar-accent-foreground: oklch(0.96 0.003 255);
+  --sidebar-primary: oklch(0.92 0.003 255);
+  --sidebar-primary-foreground: oklch(0.19 0.006 255);
+  /* Tinted brand-blue wash for active nav rows (dark mode) */
+  --sidebar-accent: oklch(0.28 0.055 240);
+  --sidebar-accent-foreground: oklch(0.82 0.10 240);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.62 0.01 255);
+  --sidebar-ring: oklch(0.68 0.14 240);
+
+  /* Lead Assassin brand accents (slightly brightened for dark bg contrast) */
+  --brand-blue: #5ba0dd;
+  --brand-gold: #f0b84a;
+  --brand-red: #e85555;
 }
 
 @layer base {
