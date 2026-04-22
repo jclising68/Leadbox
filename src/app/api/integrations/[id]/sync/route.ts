@@ -7,12 +7,11 @@ import { markSyncStartedFresh, STALE_LOCK_MS, updateSyncProgress } from "@/servi
 import { after } from "next/server";
 import { workspaceJson } from "@/lib/api-response";
 
-// Allow up to 300s for the after() sync work (Vercel Pro max)
+// Vercel Pro max. after() sync work needs the full window.
 export const maxDuration = 300;
 
-// Check if a sync is already running (DB-backed, serverless-safe).
-// Treats locks older than STALE_LOCK_MS as abandoned so a killed after()
-// (Vercel timeout, dev HMR) self-heals on the next trigger.
+// DB-backed lock so parallel requests across serverless invocations see the
+// same state. Locks older than STALE_LOCK_MS self-heal (killed after(), HMR).
 async function isSyncRunning(integrationId: string): Promise<boolean> {
   const integration = await prisma.integration.findUnique({
     where: { id: integrationId },
@@ -23,11 +22,9 @@ async function isSyncRunning(integrationId: string): Promise<boolean> {
   if (!config.syncRunning) return false;
 
   const startedAt = config.syncStartedAt as string | undefined;
-  if (startedAt) {
-    const elapsed = Date.now() - new Date(startedAt).getTime();
-    if (elapsed > STALE_LOCK_MS) return false;
+  if (startedAt && Date.now() - new Date(startedAt).getTime() > STALE_LOCK_MS) {
+    return false;
   }
-
   return true;
 }
 
@@ -40,20 +37,16 @@ async function markSyncRunning(integrationId: string, running: boolean, errorMes
   const config = ((integration?.config as Record<string, unknown>) ?? {});
 
   if (running) {
-    // Fresh attempt — wipes leftover error/progress from any prior run
-    // so the UI shows a clean "Queued..." instead of a ghost.
     markSyncStartedFresh(config);
   } else {
     delete config.syncRunning;
     delete config.syncStartedAt;
-    if (errorMessage !== undefined) {
-      if (errorMessage) {
-        config.lastError = errorMessage;
-        config.lastErrorAt = new Date().toISOString();
-      } else {
-        delete config.lastError;
-        delete config.lastErrorAt;
-      }
+    if (errorMessage) {
+      config.lastError = errorMessage;
+      config.lastErrorAt = new Date().toISOString();
+    } else {
+      delete config.lastError;
+      delete config.lastErrorAt;
     }
   }
 
@@ -88,10 +81,7 @@ export async function POST(
     });
   }
 
-  // Mark sync as running and schedule background work
   await markSyncRunning(id, true);
-  // Show a "queued" beat immediately so the UI can render progress before
-  // the background sync boots.
   await updateSyncProgress(id, {
     stage: "queued",
     message: "Queued — starting soon",
@@ -99,34 +89,24 @@ export async function POST(
   });
 
   after(async () => {
+    // Manual sync runs sync-only; enrichment goes through its own route / cron
+    // because sync + enrich together exceed Vercel's 300s function limit.
     const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
     let syncError: string | null = null;
     try {
-      // Manual Sync runs ONLY the sync phase. Enrichment is triggered
-      // explicitly by the user (via the Enrich button → /api/integrations/
-      // [id]/enrich) or by cron. Previously this route also called
-      // enrichFromInstantly() inline, but sync(250s) + enrich(120s) = 370s
-      // exceeded Vercel's 300s function limit, so enrichment consistently
-      // died mid-run at 2% and stuck the lock.
       const result = await syncFn(integration.id);
       console.log(`[sync] Completed for ${id}: ${result.synced} synced, ${result.skipped} skipped, ${result.errors} errors`);
 
-      // Auto-archive threads older than 2026-01-01 — preserves existing
-      // behavior of collapsing ancient inbox state after a fresh sync.
-      try {
-        const archived = await prisma.thread.updateMany({
-          where: {
-            workspaceId: integration.workspaceId,
-            status: "OPEN",
-            lastMessageAt: { lt: new Date("2026-01-01T00:00:00.000Z") },
-          },
-          data: { status: "ARCHIVED" },
-        });
-        if (archived.count > 0) {
-          console.log(`[sync] Auto-archived ${archived.count} pre-2026 threads`);
-        }
-      } catch (err) {
-        console.error(`[sync] Auto-archive failed:`, err instanceof Error ? err.message : err);
+      const archived = await prisma.thread.updateMany({
+        where: {
+          workspaceId: integration.workspaceId,
+          status: "OPEN",
+          lastMessageAt: { lt: new Date("2026-01-01T00:00:00.000Z") },
+        },
+        data: { status: "ARCHIVED" },
+      });
+      if (archived.count > 0) {
+        console.log(`[sync] Auto-archived ${archived.count} pre-2026 threads`);
       }
     } catch (err) {
       syncError = err instanceof Error ? err.message : String(err);
@@ -135,31 +115,25 @@ export async function POST(
       await markSyncRunning(id, false, syncError);
     }
 
-    // Auto-chain Instantly backfill. One click should walk the full history
-    // even for accounts with thousands of emails — without chaining, the
-    // user has to wait 15 min for cron to pick up the saved cursor, and is
-    // told "sync finished" while history is still incomplete. Bail if the
-    // flag's set, if there's no cursor, or if the chain hop count is at its
-    // cap (to prevent runaway recursion on a stuck cursor).
+    // Chain the next backfill run so one click walks large histories without
+    // waiting 15min for cron. Cap at MAX_HOPS to prevent runaway recursion.
     if (!syncError && integration.provider === "INSTANTLY") {
       const fresh = await prisma.integration.findUnique({
         where: { id: integration.id },
         select: { config: true },
       });
       const cfg = (fresh?.config as Record<string, unknown>) ?? {};
+      const MAX_HOPS = 5;
       if (!cfg.instantlyBackfillComplete && cfg.instantlyBackfillCursor) {
         const hop = Number(cfg.backfillChainHop ?? 0);
-        const MAX_HOPS = 5;
         if (hop < MAX_HOPS) {
           cfg.backfillChainHop = hop + 1;
           await prisma.integration.update({
             where: { id: integration.id },
             data: { config: cfg as object },
           });
-          const origin = req.nextUrl.origin;
           console.log(`[sync] Chaining backfill run ${hop + 1}/${MAX_HOPS} for ${id}`);
-          // Fire-and-forget — the next function picks up from the saved cursor.
-          fetch(`${origin}/api/integrations/${id}/sync`, {
+          fetch(`${req.nextUrl.origin}/api/integrations/${id}/sync`, {
             method: "POST",
             headers: {
               "x-workspace-id": integration.workspaceId,
@@ -167,7 +141,6 @@ export async function POST(
             },
           }).catch((e) => console.error("[sync] Chain trigger failed:", e));
         } else {
-          // Hop cap reached — clear so cron or next manual click can resume.
           delete cfg.backfillChainHop;
           await prisma.integration.update({
             where: { id: integration.id },

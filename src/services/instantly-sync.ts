@@ -127,22 +127,15 @@ async function fetchEmailsIncremental(
 
     const params: Record<string, string> = {
       limit: String(PAGE_SIZE),
-      sort_order: "desc", // Newest first — lets delta syncs early-terminate
-      // Include ALL folders (Primary + Others). Default is emode_focused which
-      // silently hides "Others"-bucketed emails and caused per-workspace
-      // history gaps — e.g. an account with lots of reply-filtered mail would
-      // stop backfilling as soon as Instantly ran out of Primary items, even
-      // though older Others-folder emails still existed.
+      sort_order: "desc",
+      // emode_all includes Primary + Others folders; the default emode_focused
+      // silently hides Others-bucketed emails.
       mode: "emode_all",
     };
     if (cursor) params.starting_after = cursor;
 
     page++;
     console.log(`[sync] Fetching emails page ${page}${cursor ? ` (cursor: ${cursor.slice(0, 8)}...)` : ""}${resumeCursor && page === 1 ? " [resuming backfill]" : ""}`);
-    // Honest progress: exact counts + the oldest email date we've reached.
-    // Previously the UI showed a fabricated percent (page * 5 + 10) that had
-    // no relationship to remaining work, so a 30k-email walk at page 20
-    // looked "55% done" when it was actually ~5% of the account.
     const reachedLabel = oldestReached
       ? ` (reached ${oldestReached.toISOString().slice(0, 10)})`
       : "";
@@ -150,7 +143,7 @@ async function fetchEmailsIncremental(
       stage: "fetching_pages",
       message: `Fetched ${allEmails.length} emails · page ${page}${reachedLabel}`,
       current: allEmails.length,
-      total: allEmails.length, // no ceiling known — UI should render counts, not %
+      total: allEmails.length,
       percent: 0,
     });
     const data = await rateLimitedFetch(apiKey, "/emails", params);
@@ -158,43 +151,31 @@ async function fetchEmailsIncremental(
     const apiCursor = data.next_starting_after as string | undefined;
 
     if (items.length === 0) {
-      // Distinguish genuine empty-account from an API hiccup mid-walk.
-      // Only the first page with no resume cursor can be a true "no emails"
-      // signal. Any other empty page is Instantly's /emails endpoint briefly
-      // returning nothing for a live cursor — previously we'd treat it as
-      // end-of-history, flip backfillComplete=true, clear the cursor and
-      // permanently lose the rest of the account's history. Now we preserve
-      // the cursor and exit as a time-budget so the next run retries.
+      // Use Instantly's own next_starting_after as the source of truth:
+      //   absent/null       → walked past the last email (true end)
+      //   same as our cursor → dead-cursor loop, treat as end
+      //   present & different → transient empty; save the advanced cursor
+      // An earlier fix chose to always preserve the old cursor here to avoid
+      // premature "done" flips, which stalled backfill forever when Instantly
+      // returned a dead cursor. Trusting the API's own signal resolves both.
+      if (!apiCursor || apiCursor === cursor) break; // outcome stays reached_end
       if (page === 1 && !resumeCursor) break;
-      console.log(`[sync] Empty items page mid-walk (cursor=${(cursor ?? "").slice(0, 8)}...) — preserving cursor for next run`);
+      console.log(`[sync] Empty items page mid-walk, advancing to ${apiCursor.slice(0, 8)}... for next run`);
       outcome = "time_budget";
-      // Preserve the cursor we USED to fetch this empty page (not apiCursor,
-      // which would be undefined here) so the next run retries the same
-      // request. resolveThread-style dedup makes this safe.
-      return { emails: allEmails, outcome, nextCursor: cursor };
+      return { emails: allEmails, outcome, nextCursor: apiCursor };
     }
     // Cutoff filter: walking DESC means the newest items are first, oldest
     // last. Keep everything above the cutoff, stop once this page's oldest
     // item falls below it (marking backfill complete for this cutoff).
     let cutoffReached = false;
-    if (cutoffDate) {
-      const kept: InstantlyEmail[] = [];
-      for (const e of items) {
-        const ts = e.timestamp_created ? new Date(e.timestamp_created) : null;
-        if (ts && ts < cutoffDate) {
-          cutoffReached = true;
-          continue;
-        }
-        kept.push(e);
-        if (ts && (!oldestReached || ts < oldestReached)) oldestReached = ts;
+    for (const e of items) {
+      const ts = e.timestamp_created ? new Date(e.timestamp_created) : null;
+      if (cutoffDate && ts && ts < cutoffDate) {
+        cutoffReached = true;
+        continue;
       }
-      allEmails.push(...kept);
-    } else {
-      allEmails.push(...items);
-      for (const e of items) {
-        const ts = e.timestamp_created ? new Date(e.timestamp_created) : null;
-        if (ts && (!oldestReached || ts < oldestReached)) oldestReached = ts;
-      }
+      allEmails.push(e);
+      if (ts && (!oldestReached || ts < oldestReached)) oldestReached = ts;
     }
 
     const newInPage = items.filter((e) => !existingIds.has(e.id)).length;
@@ -202,19 +183,12 @@ async function fetchEmailsIncremental(
     console.log(`[sync] Page ${page}: ${items.length} emails, ${newInPage} new (${Math.round(pctNew * 100)}%) — total fetched: ${allEmails.length}${cutoffReached ? " (cutoff reached)" : ""}`);
 
     if (cutoffReached) {
-      // At least one email on this page was older than the cutoff → we've
-      // walked to the user's configured backfill horizon. Mark as reached_end
-      // so the outer caller sets backfillComplete=true. The next sync will
-      // delta-sync from newest with early-termination on.
-      console.log(`[sync] Cutoff reached at page ${page}; backfill for this cutoff is complete`);
       outcome = "reached_end";
       break;
     }
 
-    // Early termination — only safe after a full historical backfill. Before
-    // that, the "mostly-old" pattern fires on page 2 for accounts that have
-    // recent activity + a historical gap, and we'd never paginate back far
-    // enough to fill the gap.
+    // Early termination only safe after a full historical backfill — before
+    // that, a mostly-old page on page 2 can skip an unfilled historical gap.
     if (allowEarlyTermination && pctNew < 0.2 && page > 1) {
       console.log(`[sync] Early termination: page ${page} is mostly old data`);
       outcome = "early_terminated";
@@ -222,11 +196,8 @@ async function fetchEmailsIncremental(
     }
 
     cursor = apiCursor;
-    // Only the absent cursor signals true end-of-history. A partial page
-    // (items.length < PAGE_SIZE) can happen mid-walk when Instantly's
-    // response size limits or filter modes trim a page — breaking on it
-    // used to end the backfill prematurely and flip `backfillComplete=true`
-    // with older emails still unfetched.
+    // Absent cursor = true end-of-history. A partial page (items.length <
+    // PAGE_SIZE) mid-walk is normal when filter modes trim output.
     if (!cursor) break;
   }
 
@@ -360,44 +331,19 @@ export async function syncInstantly(
     })).map((m) => m.externalId).filter(Boolean)
   );
 
-  // Backfill state. For large Instantly accounts one sync run can't walk the
-  // full history inside Vercel's 300s function limit — we save a resume
-  // cursor when the fetch phase hits its time budget, so subsequent syncs
-  // pick up where the last one stopped. Once we've reached the end of
-  // Instantly's history, `backfillComplete` goes true and future syncs use
-  // delta mode (early termination) for efficiency.
+  // One run can't walk a large account inside Vercel's 300s limit, so we
+  // save the cursor on time-budget exit and resume next run. `backfillComplete`
+  // flips true once Instantly signals end-of-history, after which syncs run
+  // in delta mode (early termination).
   const config = ((integration.config as Record<string, unknown>) ?? {});
-
-  // One-time auto-heal: a previous version of this sync could flip
-  // instantlyBackfillComplete=true on an empty-page API hiccup before truly
-  // reaching end-of-history, permanently stranding older emails. Clear the
-  // flag once per integration so they re-walk with the fixed logic. After
-  // this heal runs, the fixed empty-page handling ensures the flag only
-  // flips when next_starting_after === null (true end-of-history).
-  if (config.instantlyBackfillComplete && !config.instantlyBackfillHealedV2) {
-    console.log(`[sync] Auto-healing stale backfillComplete flag for integration ${integrationId}`);
-    config.instantlyBackfillComplete = false;
-    config.instantlyBackfillHealedV2 = true;
-    delete config.instantlyBackfillCursor;
-    await prisma.integration.update({
-      where: { id: integrationId },
-      data: { config: config as object },
-    });
-  }
-
   const backfillComplete = config.instantlyBackfillComplete === true;
   const resumeCursor = config.instantlyBackfillCursor as string | undefined;
 
-  // Backfill horizon. Defaults to 2026-01-01 so new accounts don't spend
-  // days walking pre-2026 history that may not be needed. User can expand
-  // the horizon via the "Expand history" action which clears this value
-  // (or sets it further back) and un-flags backfillComplete so a resync
-  // continues past the previous stopping point.
+  // Backfill horizon. Defaults to 2026-01-01; "Expand history" action
+  // overrides it and re-opens backfillComplete so we continue further back.
   const cutoffIso = (config.backfillCutoffDate as string | undefined) ?? "2026-01-01T00:00:00.000Z";
-  const cutoffDate = cutoffIso ? new Date(cutoffIso) : undefined;
-  if (cutoffDate) {
-    console.log(`[sync] Backfill cutoff: ${cutoffDate.toISOString()} (leads older than this are skipped)`);
-  }
+  const cutoffDate = new Date(cutoffIso);
+  console.log(`[sync] Backfill cutoff: ${cutoffDate.toISOString()}`);
 
   const { emails, outcome, nextCursor, oldestReached } = await fetchEmailsIncremental(
     integrationId,
@@ -411,9 +357,7 @@ export async function syncInstantly(
   );
   console.log(`[sync] Fetched ${emails.length} emails from Instantly (outcome: ${outcome}${resumeCursor ? ", resumed" : ""}${oldestReached ? `, oldest ${oldestReached.toISOString()}` : ""})`);
 
-  // Sort newest-first so the most recent data appears immediately.
-  // The thread resolver handles out-of-order processing correctly
-  // (only updates lastMessageAt/snippet if the message is newer).
+  // Sort newest-first so recent data appears immediately.
   emails.sort((a, b) => {
     const da = new Date(a.timestamp_created || 0).getTime();
     const db = new Date(b.timestamp_created || 0).getTime();
@@ -427,10 +371,6 @@ export async function syncInstantly(
   let skipped = emails.length - newEmails.length;
   let errors = 0;
 
-  // Processing progress uses a real denominator (newEmails.length), so here
-  // we CAN show a meaningful percent — it's the % of THIS run's processing
-  // pass, not the overall backfill. The UI renders percent only when the
-  // total is non-zero and reasonable.
   await updateSyncProgress(integrationId, {
     stage: "processing",
     message: `Processing ${newEmails.length} new messages`,
@@ -439,9 +379,8 @@ export async function syncInstantly(
     percent: newEmails.length > 0 ? 0 : 100,
   });
 
-  // Process only NEW emails sequentially to maintain thread ordering
+  // Process sequentially to keep thread ordering stable.
   for (const email of newEmails) {
-    // Time-budget check — stop processing if we're running out of time
     if (Date.now() - startTime > timeBudgetMs * 0.9) {
       console.log(`[sync] Time budget exhausted during processing, ${newEmails.length - synced - errors} emails deferred to next sync`);
       break;
@@ -473,32 +412,24 @@ export async function syncInstantly(
     }
   }
 
-  // Persist backfill progress. Re-read config because other writes (progress
-  // beats) may have mutated it during this run.
+  // Re-read config — progress beats may have mutated it during this run.
   const freshRow = await prisma.integration.findUnique({
     where: { id: integrationId },
     select: { config: true },
   });
   const freshConfig = ((freshRow?.config as Record<string, unknown>) ?? {});
   if (outcome === "time_budget" && nextCursor) {
-    // Ran out of time mid-walk — resume here next run.
     freshConfig.instantlyBackfillCursor = nextCursor;
   } else if (outcome === "reached_end") {
-    // Walked to the end of the account OR hit the configured cutoff.
-    // Either way this horizon is complete; future syncs run in delta mode.
     freshConfig.instantlyBackfillComplete = true;
     delete freshConfig.instantlyBackfillCursor;
   }
-  // Record oldest email date actually reached so the UI can show "synced
-  // back to YYYY-MM-DD" instead of a guess.
   if (oldestReached) {
     const prev = freshConfig.instantlyOldestReached as string | undefined;
     if (!prev || new Date(prev) > oldestReached) {
       freshConfig.instantlyOldestReached = oldestReached.toISOString();
     }
   }
-  // outcome === "early_terminated" only fires when backfillComplete is
-  // already true, so no state change needed.
   await prisma.integration.update({
     where: { id: integrationId },
     data: { config: freshConfig as object, lastSyncAt: new Date() },

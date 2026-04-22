@@ -53,22 +53,3 @@ export async function updateSyncProgress(
   }
 }
 
-export async function clearSyncProgress(integrationId: string) {
-  try {
-    const row = await prisma.integration.findUnique({
-      where: { id: integrationId },
-      select: { config: true },
-    });
-    const config = ((row?.config as Record<string, unknown>) ?? {});
-    delete config.syncProgress;
-    await prisma.integration.update({
-      where: { id: integrationId },
-      data: { config: config as object },
-    });
-  } catch (err) {
-    console.warn(
-      `[sync-progress] Failed to clear progress for ${integrationId}:`,
-      err instanceof Error ? err.message : err,
-    );
-  }
-}

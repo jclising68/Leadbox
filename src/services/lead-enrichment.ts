@@ -411,13 +411,9 @@ export async function enrichFromInstantly(
   );
   console.log(`[enrich] ${prospectByEmail.size} existing prospects in workspace`);
 
-  // 4. Paginate through ALL Instantly leads. For each lead:
-  //    - If prospect exists in DB → update (enrich)
-  //    - If prospect is new AND the lead has replied or been tagged → create (import)
-  //    Over multiple cron cycles the cursor progresses through the full list.
-  //    Cursor persists in integration.config.instantlyEnrichmentCursor so
-  //    repeated runs cover the full lead space instead of restarting at the
-  //    top each time (previously a known coverage gap for large accounts).
+  // Paginate through Instantly leads. Existing prospect → update; new lead
+  // that replied or was tagged → import. Cursor persists across cron cycles
+  // so repeated runs cover the full lead space.
   const config = ((integration.config as Record<string, unknown>) ?? {});
   let cursor: string | undefined = config.instantlyEnrichmentCursor as string | undefined;
   if (cursor) {
