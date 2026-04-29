@@ -73,6 +73,13 @@ export async function POST(
     return NextResponse.json({ error: "Integration not found" }, { status: 404 });
   }
 
+  if (integration.provider !== "INSTANTLY" && integration.provider !== "HEYREACH") {
+    return NextResponse.json(
+      { error: `Sync is not supported for ${integration.provider}. Only Instantly and HeyReach pull threads/messages.` },
+      { status: 400 },
+    );
+  }
+
   if (await isSyncRunning(id)) {
     return NextResponse.json({
       success: true,
@@ -91,6 +98,7 @@ export async function POST(
   after(async () => {
     // Manual sync runs sync-only; enrichment goes through its own route / cron
     // because sync + enrich together exceed Vercel's 300s function limit.
+    // Provider was validated above, so this is safe.
     const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
     let syncError: string | null = null;
     try {

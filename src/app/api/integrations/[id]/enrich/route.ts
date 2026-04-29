@@ -64,6 +64,17 @@ export async function POST(
     return NextResponse.json({ error: "Integration not found" }, { status: 404 });
   }
 
+  if (integration.provider !== "INSTANTLY" && integration.provider !== "HEYREACH") {
+    return NextResponse.json(
+      {
+        error:
+          `Per-integration enrich is not supported for ${integration.provider}. ` +
+          `Use the Leads page enrichment for Blitz/Apollo.`,
+      },
+      { status: 400 },
+    );
+  }
+
   if (await isEnrichRunning(id)) {
     return NextResponse.json({ success: true, status: "already_running" });
   }
@@ -75,10 +86,14 @@ export async function POST(
       if (integration.provider === "INSTANTLY") {
         const result = await enrichFromInstantly(integration.id);
         console.log(`[enrich] Done for ${id}: ${result.enriched} enriched`);
-      } else {
-        // HeyReach enrichment runs as part of sync (conversations include profile data)
+      } else if (integration.provider === "HEYREACH") {
+        // HeyReach has no separate enrich endpoint — conversations bundle
+        // profile data inline, so re-running the sync is the enrich.
         const result = await syncHeyreach(integration.id);
         console.log(`[enrich] HeyReach re-sync for enrichment ${id}: ${result.synced} synced`);
+      } else {
+        // Validated upstream; this branch is unreachable.
+        console.error(`[enrich] No handler for provider ${integration.provider}`);
       }
     } catch (e) {
       console.error(`[enrich] Failed for ${id}:`, e instanceof Error ? e.message : e);

@@ -31,10 +31,11 @@ export async function POST(req: NextRequest) {
   const { error, workspaceId } = await requireWorkspaceAccess(req);
   if (error) return error;
 
-  // Include inactive integrations so the UI can show why they didn't sync
-  // (otherwise Stable Sea's broken integration was invisible).
+  // Inbound providers only. BLITZ/APOLLO are enrichment providers — they don't
+  // pull threads/messages, so sweeping them through sync-all routes their
+  // API key into the wrong provider and 401s.
   const integrations = await prisma.integration.findMany({
-    where: { workspaceId: workspaceId! },
+    where: { workspaceId: workspaceId!, provider: { in: ["INSTANTLY", "HEYREACH"] } },
     select: { id: true, provider: true, lastSyncAt: true, isActive: true, config: true },
   });
 
@@ -118,7 +119,18 @@ export async function POST(req: NextRequest) {
     });
 
     after(async () => {
-      const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
+      const syncFn =
+        integration.provider === "INSTANTLY"
+          ? syncInstantly
+          : integration.provider === "HEYREACH"
+          ? syncHeyreach
+          : null;
+      if (!syncFn) {
+        // Should never happen given the where-clause above; guard anyway so a
+        // future provider added to the enum doesn't get routed to syncHeyreach.
+        console.error(`[sync-all] No sync handler for provider ${integration.provider}`);
+        return;
+      }
       let syncError: string | null = null;
       try {
         const result = await syncFn(integration.id);

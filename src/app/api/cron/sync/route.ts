@@ -26,9 +26,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Fetch all active integrations across all workspaces
+  // Fetch all active inbound integrations across all workspaces.
+  // BLITZ/APOLLO are enrichment providers (on-demand, from the Leads page) —
+  // they have no threads/messages to pull, so the cron must skip them.
+  // Sweeping them here previously routed Blitz/Apollo keys into syncHeyreach
+  // and 401'd against /Campaign/GetAll on every cron tick.
   const integrations = await prisma.integration.findMany({
-    where: { isActive: true },
+    where: { isActive: true, provider: { in: ["INSTANTLY", "HEYREACH"] } },
     select: { id: true, provider: true, workspaceId: true, config: true },
     orderBy: { lastSyncAt: "asc" }, // Prioritize least-recently synced
   });
@@ -87,7 +91,19 @@ export async function GET(req: NextRequest) {
         try {
           console.log(`[cron] Syncing ${integration.provider} ${integration.id} (sync ${SYNC_BUDGET_MS / 1000}s + enrich ${ENRICH_BUDGET_MS / 1000}s)`);
 
-          const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
+          const syncFn =
+            integration.provider === "INSTANTLY"
+              ? syncInstantly
+              : integration.provider === "HEYREACH"
+              ? syncHeyreach
+              : null;
+          if (!syncFn) {
+            // Defense in depth — the where-clause above filters non-inbound
+            // providers, but if a future provider gets added without a
+            // handler we fail loud instead of silently routing to HeyReach.
+            console.error(`[cron] No sync handler for provider ${integration.provider}`);
+            return { skipped: true };
+          }
           const result = await syncFn(integration.id, SYNC_BUDGET_MS);
 
           console.log(
