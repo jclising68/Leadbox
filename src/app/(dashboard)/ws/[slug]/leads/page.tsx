@@ -63,6 +63,7 @@ const COLUMNS = [
   { key: "email", label: "Email", w: 200, sortable: true, sortField: "email" },
   { key: "phone", label: "Phone", w: 120, sortable: false, sortField: "" },
   { key: "title", label: "Title", w: 140, sortable: false, sortField: "" },
+  { key: "linkedinUrl", label: "LinkedIn", w: 160, sortable: false, sortField: "" },
   { key: "company", label: "Company", w: 140, sortable: true, sortField: "company" },
   { key: "domain", label: "Domain", w: 130, sortable: true, sortField: "domain" },
   { key: "leadStatus", label: "Lead Status", w: 140, sortable: false, sortField: "" },
@@ -101,24 +102,41 @@ function EnrichableCell({
   source,
   className,
   copyable = true,
+  href,
 }: {
   value: string | null | undefined;
   source: EnrichSource | undefined;
   className?: string;
   copyable?: boolean;
+  /** When set, wraps the value in an external link (used by LinkedIn URL column). */
+  href?: string | null;
 }) {
   const hasValue = value && value !== "-" && value.trim() !== "";
 
   if (hasValue) {
+    const display = href ? (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="truncate text-primary hover:underline"
+        title={href}
+      >
+        {value}
+      </a>
+    ) : (
+      <span className="truncate">{value}</span>
+    );
     return (
       <span className={cn("group/cell inline-flex items-center gap-1 max-w-full", className)}>
-        <span className="truncate">{value}</span>
+        {display}
         <SourceBadge source={source} />
         {copyable && (
           <button
             onClick={(e) => {
               e.stopPropagation();
-              navigator.clipboard.writeText(value!);
+              navigator.clipboard.writeText(href || value!);
               toast.success("Copied!");
             }}
             className="opacity-0 group-hover/cell:opacity-100 shrink-0 text-muted-foreground hover:text-foreground transition-opacity"
@@ -972,8 +990,28 @@ export default function LeadsPage() {
                     />
                   </div>
 
-                  {/* Company */}
+                  {/* LinkedIn URL */}
                   <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[8].w}px` }}>
+                    {(() => {
+                      const url = p.linkedinUrl as string | null | undefined;
+                      // Strip the boilerplate prefix so the cell shows the
+                      // useful identifier (e.g. "in/john-doe") rather than
+                      // truncating "https://www.linkedin.c...".
+                      const display = url
+                        ? url.replace(/^https?:\/\/(www\.)?linkedin\.com\//, "").replace(/\/$/, "")
+                        : url;
+                      return (
+                        <EnrichableCell
+                          value={display}
+                          source={enrichmentSource.linkedinUrl}
+                          href={url}
+                        />
+                      );
+                    })()}
+                  </div>
+
+                  {/* Company */}
+                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[9].w}px` }}>
                     <EnrichableCell
                       value={p.company as string | null | undefined}
                       source={enrichmentSource.company}
@@ -981,12 +1019,12 @@ export default function LeadsPage() {
                   </div>
 
                   {/* Domain */}
-                  <div className="shrink-0 px-3 text-xs truncate text-muted-foreground" style={{ width: `${COLUMNS[9].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs truncate text-muted-foreground" style={{ width: `${COLUMNS[10].w}px` }}>
                     <CopyCell value={(p.domain as string) || "-"} />
                   </div>
 
                   {/* Lead Status — editable dropdown */}
-                  <div className="shrink-0 px-3 flex items-center gap-1 overflow-hidden" style={{ width: `${COLUMNS[10].w}px` }}>
+                  <div className="shrink-0 px-3 flex items-center gap-1 overflow-hidden" style={{ width: `${COLUMNS[11].w}px` }}>
                     <StatusCell
                       prospectId={p.id as string}
                       value={(p.leadStatus as string) || (threadLabels[0]?.label?.name || "")}
@@ -995,7 +1033,7 @@ export default function LeadsPage() {
                   </div>
 
                   {/* Campaign */}
-                  <div className="shrink-0 px-3 text-xs truncate text-muted-foreground" style={{ width: `${COLUMNS[11].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs truncate text-muted-foreground" style={{ width: `${COLUMNS[12].w}px` }}>
                     <CopyCell value={(p.campaignName as string) || (latestMsg?.campaignName as string) || "-"} />
                   </div>
 
@@ -1005,13 +1043,13 @@ export default function LeadsPage() {
                       "shrink-0 px-3 text-xs tabular-nums",
                       stepReplied ? "text-muted-foreground" : "text-muted-foreground/60"
                     )}
-                    style={{ width: `${COLUMNS[12].w}px` }}
+                    style={{ width: `${COLUMNS[13].w}px` }}
                   >
                     {stepReplied || "-"}
                   </div>
 
                   {/* Notes */}
-                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[13].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[14].w}px` }}>
                     <EditableCell
                       prospectId={p.id as string}
                       field="notes"
@@ -1021,7 +1059,7 @@ export default function LeadsPage() {
                   </div>
 
                   {/* Feedback */}
-                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[14].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[15].w}px` }}>
                     <EditableCell
                       prospectId={p.id as string}
                       field="feedback"
