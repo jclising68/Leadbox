@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Outfit, Instrument_Serif, Geist_Mono } from "next/font/google";
+import { Outfit, Instrument_Serif, Geist_Mono, Inter } from "next/font/google";
 import { Providers } from "@/components/providers";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -22,6 +22,12 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: "LeadBox - Unified Sales Inbox",
   description: "Centralized inbox for Instantly, HeyReach and more",
@@ -42,7 +48,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${outfit.variable} ${instrumentSerif.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${outfit.variable} ${instrumentSerif.variable} ${geistMono.variable} ${inter.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <body className="min-h-full bg-background text-foreground">

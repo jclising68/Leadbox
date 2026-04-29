@@ -2,28 +2,21 @@ import Image from "next/image";
 import { cn } from "@/lib/utils";
 
 type LogoProps = {
-  /** Show only the hexagon icon (used in collapsed sidebar / small spaces) */
+  /** Show only the icon (used in collapsed sidebar / small spaces) */
   iconOnly?: boolean;
   /** Tailwind height utility — defaults differ between full + icon variants */
   className?: string;
   priority?: boolean;
 };
 
-/**
- * Theme-aware brand logo.
- *
- * Renders both light + dark variants and uses Tailwind's `dark:` variant to
- * toggle visibility. This avoids hydration flicker that a JS-based swap
- * (`useTheme()`) would cause on first paint.
- */
 export function Logo({ iconOnly = false, className, priority = false }: LogoProps) {
   if (iconOnly) {
     return (
       <Image
-        src="/branding/logo-icon.png"
+        src="/branding/leadassassin-logo.png"
         alt="LeadBox"
-        width={308}
-        height={342}
+        width={2480}
+        height={2480}
         priority={priority}
         className={cn("h-8 w-auto", className)}
       />
@@ -31,25 +24,20 @@ export function Logo({ iconOnly = false, className, priority = false }: LogoProp
   }
 
   return (
-    <>
-      {/* Light theme: dark text on light backgrounds */}
+    <div className={cn("flex items-center gap-2", className)}>
       <Image
-        src="/branding/logo-light.png"
+        src="/branding/leadassassin-logo.png"
         alt="LeadBox"
-        width={1001}
-        height={248}
+        width={2480}
+        height={2480}
         priority={priority}
-        className={cn("h-8 w-auto block dark:hidden", className)}
+        className="h-10 w-10 shrink-0"
       />
-      {/* Dark theme: light text on dark backgrounds */}
-      <Image
-        src="/branding/logo-dark.png"
-        alt="LeadBox"
-        width={1034}
-        height={275}
-        priority={priority}
-        className={cn("h-8 w-auto hidden dark:block", className)}
-      />
-    </>
+      <span
+        className="font-[family-name:var(--font-inter)] text-2xl font-black tracking-tight text-foreground"
+      >
+        LEADBOX
+      </span>
+    </div>
   );
 }

@@ -225,7 +225,7 @@ export function EnrichDialog({ open, onOpenChange, selected, hasBlitz, hasApollo
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[90vh]">
+      <DialogContent className="max-w-md max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
