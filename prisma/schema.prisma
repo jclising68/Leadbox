@@ -69,6 +69,10 @@ model Workspace {
   // for any unknown tag they encounter from Instantly/HeyReach. When false,
   // unknown tags are silently skipped — labels must be created manually.
   autoCreateLabels Boolean       @default(true)
+  // Workspace-level transient state (e.g. enrichRunning flag for the
+  // Blitz/Apollo enrichment background job). Treated as opaque Json so
+  // small flags can be added without further migrations.
+  config       Json?
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   members      WorkspaceMember[]
@@ -126,32 +130,44 @@ model Integration {
 enum Provider {
   INSTANTLY
   HEYREACH
+  BLITZ
+  APOLLO
 }
 
 // ─── PROSPECTS & THREADS ─────────────────────────────
 
 model Prospect {
-  id           String    @id @default(cuid())
-  workspaceId  String
-  email        String?
-  linkedinUrl  String?
-  firstName    String?
-  lastName     String?
-  company      String?
-  title        String?
-  domain       String?
-  phone        String?
-  leadStatus   String?
-  campaignName String?
-  stepReplied  String?
-  notes        String?
-  feedback     String?
-  sourceDate   DateTime?
-  externalIds  Json?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  thread       Thread?
+  id                String    @id @default(cuid())
+  workspaceId       String
+  email             String?
+  linkedinUrl       String?
+  firstName         String?
+  lastName          String?
+  company           String?
+  title             String?
+  domain            String?
+  phone             String?
+  leadStatus        String?
+  campaignName      String?
+  stepReplied       String?
+  notes             String?
+  feedback          String?
+  sourceDate        DateTime?
+  externalIds       Json?
+  // Enrichment metadata — third-party data fill via Blitz/Apollo waterfall.
+  // enrichedFields tracks fields the orchestrator has touched (for skip-on-rerun).
+  // enrichmentSource is per-field provenance: { phone: "BLITZ" | "APOLLO" | "NOT_FOUND" }.
+  // The NOT_FOUND sentinel is the cost lever — we never call providers again for
+  // a field already marked NOT_FOUND unless the user opts in via retryNotFound.
+  enrichedAt        DateTime?
+  enrichedFields    String[]  @default([])
+  enrichmentSource  Json?
+  emailStatus       String?
+  enrichmentError   String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  thread            Thread?
 
   @@unique([workspaceId, email])
   @@unique([workspaceId, linkedinUrl])

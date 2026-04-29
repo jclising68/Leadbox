@@ -116,31 +116,36 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!["INSTANTLY", "HEYREACH"].includes(provider)) {
+  if (!["INSTANTLY", "HEYREACH", "BLITZ", "APOLLO"].includes(provider)) {
     return NextResponse.json(
       { error: "Invalid provider" },
       { status: 400 }
     );
   }
 
-  // Test connection before saving
-  try {
-    const isValid = provider === "INSTANTLY"
-      ? await testInstantlyConnection(apiKey)
-      : await testHeyreachConnection(apiKey);
+  // Test connection before saving (only for inbound providers that have
+  // dedicated test endpoints). For BLITZ/APOLLO, skip the test — they're
+  // outbound-only and the enrichment flow surfaces auth errors clearly on
+  // first use, so we don't burn a credit on a precautionary test call.
+  if (provider === "INSTANTLY" || provider === "HEYREACH") {
+    try {
+      const isValid = provider === "INSTANTLY"
+        ? await testInstantlyConnection(apiKey)
+        : await testHeyreachConnection(apiKey);
 
-    if (!isValid) {
+      if (!isValid) {
+        return NextResponse.json(
+          { error: `Failed to connect to ${provider}. Please verify your API key is correct and has the necessary permissions.` },
+          { status: 400 }
+        );
+      }
+    } catch (err) {
+      console.error(`[integration] Connection test error for ${provider}:`, err);
       return NextResponse.json(
-        { error: `Failed to connect to ${provider}. Please verify your API key is correct and has the necessary permissions.` },
+        { error: `Connection test failed: ${err instanceof Error ? err.message : "Unknown error"}` },
         { status: 400 }
       );
     }
-  } catch (err) {
-    console.error(`[integration] Connection test error for ${provider}:`, err);
-    return NextResponse.json(
-      { error: `Connection test failed: ${err instanceof Error ? err.message : "Unknown error"}` },
-      { status: 400 }
-    );
   }
 
   const { encrypted, iv, tag } = encrypt(apiKey);
@@ -161,16 +166,19 @@ export async function POST(req: NextRequest) {
   // Trigger historical sync in background. Enrichment is explicitly NOT run
   // here — sync+enrich together exceed Vercel's 300s function limit for
   // large accounts. User can click Enrich once initial sync completes, or
-  // the next cron tick will pick it up.
-  after(async () => {
-    const syncFn = provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
-    try {
-      const result = await syncFn(integration.id);
-      console.log(`[sync] Initial sync done for ${integration.id}: ${result.synced} synced`);
-    } catch (err) {
-      console.error(`[sync] Background sync failed for ${integration.id}:`, err);
-    }
-  });
+  // the next cron tick will pick it up. BLITZ/APOLLO are outbound-only
+  // (no inbound sync) so we skip this.
+  if (provider === "INSTANTLY" || provider === "HEYREACH") {
+    after(async () => {
+      const syncFn = provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
+      try {
+        const result = await syncFn(integration.id);
+        console.log(`[sync] Initial sync done for ${integration.id}: ${result.synced} synced`);
+      } catch (err) {
+        console.error(`[sync] Background sync failed for ${integration.id}:`, err);
+      }
+    });
+  }
 
   return NextResponse.json(
     {

@@ -7,9 +7,10 @@ import { useInboxStore } from "@/stores/inbox-store";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { useRouter, useParams } from "next/navigation";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { EnrichDialog, type EnrichDialogProspect } from "@/components/leads/enrich-dialog";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -41,11 +43,19 @@ import {
   Calendar,
   Check,
   Pencil,
+  Sparkles,
+  Ban,
 } from "lucide-react";
+
+// Field-key shape for the source map; mirrors EnrichField in services/enrichment.ts.
+type EnrichFieldKey = "phone" | "title" | "linkedinUrl" | "verifiedEmail" | "company";
+type EnrichSource = "BLITZ" | "APOLLO" | "NOT_FOUND";
+type EnrichmentSourceMap = Partial<Record<EnrichFieldKey, EnrichSource>>;
 
 type SortConfig = { field: string; dir: "asc" | "desc" };
 
 const COLUMNS = [
+  { key: "select", label: "", w: 36, sortable: false, sortField: "" },
   { key: "date", label: "Date", w: 95, sortable: true, sortField: "lastMessageAt" },
   { key: "source", label: "", w: 32, sortable: false, sortField: "" },
   { key: "firstName", label: "First Name", w: 110, sortable: true, sortField: "firstName" },
@@ -61,6 +71,80 @@ const COLUMNS = [
   { key: "notes", label: "Notes", w: 140, sortable: false, sortField: "" },
   { key: "feedback", label: "Feedback", w: 140, sortable: false, sortField: "" },
 ];
+
+// Tiny B (Blitz) / A (Apollo) provenance badge rendered next to enriched cell
+// values. Helps the user spot-check which fields came from which provider.
+function SourceBadge({ source }: { source: EnrichSource | undefined }) {
+  if (source !== "BLITZ" && source !== "APOLLO") return null;
+  const isBlitz = source === "BLITZ";
+  return (
+    <span
+      title={`Enriched via ${isBlitz ? "Blitz" : "Apollo"}`}
+      className={cn(
+        "inline-flex items-center justify-center w-3.5 h-3.5 rounded-[3px] text-[8px] font-bold shrink-0 ml-1",
+        isBlitz
+          ? "bg-blue-500/15 text-blue-600 dark:text-blue-300 ring-1 ring-inset ring-blue-500/25"
+          : "bg-purple-500/15 text-purple-600 dark:text-purple-300 ring-1 ring-inset ring-purple-500/25",
+      )}
+    >
+      {isBlitz ? "B" : "A"}
+    </span>
+  );
+}
+
+// Cell renderer that handles three states:
+//   1. Has value → render with optional source badge (CopyCell-style)
+//   2. NOT_FOUND  → render "No data available" with ⊘ icon
+//   3. Missing, never tried → render "-" placeholder
+function EnrichableCell({
+  value,
+  source,
+  className,
+  copyable = true,
+}: {
+  value: string | null | undefined;
+  source: EnrichSource | undefined;
+  className?: string;
+  copyable?: boolean;
+}) {
+  const hasValue = value && value !== "-" && value.trim() !== "";
+
+  if (hasValue) {
+    return (
+      <span className={cn("group/cell inline-flex items-center gap-1 max-w-full", className)}>
+        <span className="truncate">{value}</span>
+        <SourceBadge source={source} />
+        {copyable && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              navigator.clipboard.writeText(value!);
+              toast.success("Copied!");
+            }}
+            className="opacity-0 group-hover/cell:opacity-100 shrink-0 text-muted-foreground hover:text-foreground transition-opacity"
+            title="Copy"
+          >
+            <Copy className="h-3 w-3" />
+          </button>
+        )}
+      </span>
+    );
+  }
+
+  if (source === "NOT_FOUND") {
+    return (
+      <span
+        className={cn("inline-flex items-center gap-1 text-muted-foreground/60 italic", className)}
+        title="Searched both providers — no data available"
+      >
+        <Ban className="h-3 w-3 shrink-0" />
+        <span className="truncate text-[11px]">No data available</span>
+      </span>
+    );
+  }
+
+  return <span className={cn("text-muted-foreground/60", className)}>-</span>;
+}
 
 const TOTAL_W = COLUMNS.reduce((s, c) => s + c.w, 0);
 
@@ -376,10 +460,46 @@ export default function LeadsPage() {
   const [replyProspect, setReplyProspect] = useState<Record<string, unknown> | null>(null);
   const [replyMessages, setReplyMessages] = useState<Record<string, unknown>[]>([]);
   const [replyLoading, setReplyLoading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [enrichDialogOpen, setEnrichDialogOpen] = useState(false);
   const router = useRouter();
   const workspaceId = useCurrentWorkspaceId();
   const { setSelectedThread, setView, setSelectedLabel, clearFilters: clearInboxFilters } = useInboxStore();
   const { data: labels } = useLabels();
+
+  // Whether this workspace has Blitz / Apollo configured. Drives the
+  // Enrich button's disabled state and the dialog's submit-ability.
+  const { data: integrations } = useQuery({
+    queryKey: ["integrations", workspaceId],
+    queryFn: async () => {
+      if (!workspaceId) return [] as { provider: string; isActive: boolean }[];
+      const res = await fetch("/api/integrations", {
+        headers: { "x-workspace-id": workspaceId },
+        cache: "no-store",
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!workspaceId,
+    staleTime: 30000,
+  });
+  const hasBlitz = useMemo(
+    () => (integrations ?? []).some((i: { provider: string; isActive: boolean }) => i.provider === "BLITZ" && i.isActive),
+    [integrations],
+  );
+  const hasApollo = useMemo(
+    () => (integrations ?? []).some((i: { provider: string; isActive: boolean }) => i.provider === "APOLLO" && i.isActive),
+    [integrations],
+  );
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useProspects({
     search,
@@ -624,6 +744,37 @@ export default function LeadsPage() {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {selectedIds.size > 0 && (
+            <div className="ml-auto flex items-center gap-2">
+              {!hasBlitz && !hasApollo && (
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30"
+                  title="No enrichment provider configured for this workspace"
+                >
+                  <Ban className="h-3 w-3" />
+                  Setup needed
+                </span>
+              )}
+              <button
+                onClick={() => setEnrichDialogOpen(true)}
+                title={
+                  !hasBlitz && !hasApollo
+                    ? "Click to see setup instructions"
+                    : `Enrich ${selectedIds.size} selected lead${selectedIds.size === 1 ? "" : "s"}`
+                }
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+                  hasBlitz || hasApollo
+                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                    : "bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/40 hover:bg-amber-500/25"
+                )}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Enrich {selectedIds.size} lead{selectedIds.size === 1 ? "" : "s"}
+              </button>
+            </div>
+          )}
+
           {hasFilters && (
             <button
               onClick={() => { setLabelFilter(""); setChannelFilter(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); }}
@@ -642,25 +793,54 @@ export default function LeadsPage() {
           className="flex items-center border-b border-border py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide sticky top-0 z-10 backdrop-blur bg-card/95 supports-[backdrop-filter]:bg-card/80"
           style={{ minWidth: `${TOTAL_W}px` }}
         >
-          {COLUMNS.map((col) => (
-            <div
-              key={col.key}
-              className={cn(
-                "shrink-0 px-3 flex items-center gap-1",
-                col.sortable && "cursor-pointer hover:text-foreground select-none"
-              )}
-              style={{ width: `${col.w}px` }}
-              onClick={() => col.sortable && toggleSort(col.sortField)}
-            >
-              {col.label}
-              {col.sortable && sort.field === col.sortField && (
-                sort.dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-              )}
-              {col.sortable && sort.field !== col.sortField && col.label && (
-                <ArrowUpDown className="h-3 w-3 opacity-40" />
-              )}
-            </div>
-          ))}
+          {COLUMNS.map((col) => {
+            // Select column gets a select-all checkbox instead of a label.
+            if (col.key === "select") {
+              const allSelected =
+                prospects.length > 0 &&
+                prospects.every((pp) => selectedIds.has((pp as { id: string }).id));
+              const someSelected = selectedIds.size > 0 && !allSelected;
+              return (
+                <div
+                  key={col.key}
+                  className="shrink-0 px-2 flex items-center justify-center"
+                  style={{ width: `${col.w}px` }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Checkbox
+                    checked={allSelected || someSelected}
+                    onCheckedChange={() => {
+                      setSelectedIds((prev) => {
+                        if (allSelected) return new Set();
+                        const next = new Set(prev);
+                        for (const pp of prospects) next.add((pp as { id: string }).id);
+                        return next;
+                      });
+                    }}
+                  />
+                </div>
+              );
+            }
+            return (
+              <div
+                key={col.key}
+                className={cn(
+                  "shrink-0 px-3 flex items-center gap-1",
+                  col.sortable && "cursor-pointer hover:text-foreground select-none"
+                )}
+                style={{ width: `${col.w}px` }}
+                onClick={() => col.sortable && toggleSort(col.sortField)}
+              >
+                {col.label}
+                {col.sortable && sort.field === col.sortField && (
+                  sort.dir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+                )}
+                {col.sortable && sort.field !== col.sortField && col.label && (
+                  <ArrowUpDown className="h-3 w-3 opacity-40" />
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Table body */}
@@ -716,6 +896,7 @@ export default function LeadsPage() {
                 || (p.createdAt as string);
 
               const stepReplied = (p.stepReplied as string) || "";
+              const enrichmentSource = (p.enrichmentSource as EnrichmentSourceMap) ?? {};
               return (
                 <div
                   key={p.id as string}
@@ -735,53 +916,77 @@ export default function LeadsPage() {
                   )}
                   onClick={() => openReplyPopup(p)}
                 >
+                  {/* Selection checkbox */}
+                  <div
+                    className="shrink-0 px-2 flex items-center justify-center"
+                    style={{ width: `${COLUMNS[0].w}px` }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Checkbox
+                      checked={selectedIds.has(p.id as string)}
+                      onCheckedChange={() => toggleSelected(p.id as string)}
+                    />
+                  </div>
+
                   {/* Date */}
-                  <div className="shrink-0 px-3 text-xs text-muted-foreground tabular-nums" style={{ width: `${COLUMNS[0].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs text-muted-foreground tabular-nums" style={{ width: `${COLUMNS[1].w}px` }}>
                     <span title={formatFullDateTime(displayDate)}>{formatDate(displayDate)}</span>
                   </div>
 
                   {/* Provider icon */}
-                  <div className="shrink-0 px-1 flex items-center justify-center" style={{ width: `${COLUMNS[1].w}px` }}>
+                  <div className="shrink-0 px-1 flex items-center justify-center" style={{ width: `${COLUMNS[2].w}px` }}>
                     <ProviderIcon provider={provider} channel={channel} />
                   </div>
 
                   {/* First Name */}
-                  <div className="shrink-0 px-3 text-xs" style={{ width: `${COLUMNS[2].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs" style={{ width: `${COLUMNS[3].w}px` }}>
                     <CopyCell value={(p.firstName as string) || "-"} />
                   </div>
 
                   {/* Last Name */}
-                  <div className="shrink-0 px-3 text-xs" style={{ width: `${COLUMNS[3].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs" style={{ width: `${COLUMNS[4].w}px` }}>
                     <CopyCell value={(p.lastName as string) || "-"} />
                   </div>
 
                   {/* Email */}
-                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[4].w}px` }}>
-                    <CopyCell value={(p.email as string) || "-"} />
+                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[5].w}px` }}>
+                    <EnrichableCell
+                      value={p.email as string | null | undefined}
+                      source={enrichmentSource.verifiedEmail}
+                    />
                   </div>
 
                   {/* Phone */}
-                  <div className="shrink-0 px-3 text-xs tabular-nums" style={{ width: `${COLUMNS[5].w}px` }}>
-                    <CopyCell value={(p.phone as string) || "-"} />
+                  <div className="shrink-0 px-3 text-xs tabular-nums" style={{ width: `${COLUMNS[6].w}px` }}>
+                    <EnrichableCell
+                      value={p.phone as string | null | undefined}
+                      source={enrichmentSource.phone}
+                    />
                   </div>
 
                   {/* Title */}
-                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[6].w}px` }}>
-                    <CopyCell value={(p.title as string) || "-"} />
+                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[7].w}px` }}>
+                    <EnrichableCell
+                      value={p.title as string | null | undefined}
+                      source={enrichmentSource.title}
+                    />
                   </div>
 
                   {/* Company */}
-                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[7].w}px` }}>
-                    <CopyCell value={(p.company as string) || "-"} />
+                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[8].w}px` }}>
+                    <EnrichableCell
+                      value={p.company as string | null | undefined}
+                      source={enrichmentSource.company}
+                    />
                   </div>
 
                   {/* Domain */}
-                  <div className="shrink-0 px-3 text-xs truncate text-muted-foreground" style={{ width: `${COLUMNS[8].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs truncate text-muted-foreground" style={{ width: `${COLUMNS[9].w}px` }}>
                     <CopyCell value={(p.domain as string) || "-"} />
                   </div>
 
                   {/* Lead Status — editable dropdown */}
-                  <div className="shrink-0 px-3 flex items-center gap-1 overflow-hidden" style={{ width: `${COLUMNS[9].w}px` }}>
+                  <div className="shrink-0 px-3 flex items-center gap-1 overflow-hidden" style={{ width: `${COLUMNS[10].w}px` }}>
                     <StatusCell
                       prospectId={p.id as string}
                       value={(p.leadStatus as string) || (threadLabels[0]?.label?.name || "")}
@@ -790,7 +995,7 @@ export default function LeadsPage() {
                   </div>
 
                   {/* Campaign */}
-                  <div className="shrink-0 px-3 text-xs truncate text-muted-foreground" style={{ width: `${COLUMNS[10].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs truncate text-muted-foreground" style={{ width: `${COLUMNS[11].w}px` }}>
                     <CopyCell value={(p.campaignName as string) || (latestMsg?.campaignName as string) || "-"} />
                   </div>
 
@@ -800,13 +1005,13 @@ export default function LeadsPage() {
                       "shrink-0 px-3 text-xs tabular-nums",
                       stepReplied ? "text-muted-foreground" : "text-muted-foreground/60"
                     )}
-                    style={{ width: `${COLUMNS[11].w}px` }}
+                    style={{ width: `${COLUMNS[12].w}px` }}
                   >
                     {stepReplied || "-"}
                   </div>
 
                   {/* Notes */}
-                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[12].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[13].w}px` }}>
                     <EditableCell
                       prospectId={p.id as string}
                       field="notes"
@@ -816,7 +1021,7 @@ export default function LeadsPage() {
                   </div>
 
                   {/* Feedback */}
-                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[13].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[14].w}px` }}>
                     <EditableCell
                       prospectId={p.id as string}
                       field="feedback"
@@ -850,20 +1055,50 @@ export default function LeadsPage() {
             </DialogTitle>
           </DialogHeader>
 
-          {/* Prospect info bar */}
-          {replyProspect && (
-            <div className="flex items-center gap-4 text-xs text-muted-foreground border-b border-border pb-3">
-              {replyProspect.company ? (
-                <span>{String(replyProspect.company)}</span>
-              ) : null}
-              {replyProspect.title ? (
-                <span>{String(replyProspect.title)}</span>
-              ) : null}
-              {replyProspect.campaignName ? (
-                <span>Campaign: {String(replyProspect.campaignName)}</span>
-              ) : null}
-            </div>
-          )}
+          {/* Prospect info bar — enrichment-aware. NOT_FOUND fields render
+              "No data available" so the user can see what's been searched and
+              missed without re-triggering enrichment. */}
+          {replyProspect && (() => {
+            const src = (replyProspect.enrichmentSource as EnrichmentSourceMap) ?? {};
+            const detailRow = (label: string, value: unknown, fieldKey: EnrichFieldKey | null) => {
+              const v = value && String(value).trim() ? String(value) : "";
+              const source = fieldKey ? src[fieldKey] : undefined;
+              if (v) {
+                return (
+                  <span key={label} className="inline-flex items-center gap-1">
+                    <span className="text-muted-foreground">{label}:</span>
+                    <span className="text-foreground">{v}</span>
+                    <SourceBadge source={source} />
+                  </span>
+                );
+              }
+              if (source === "NOT_FOUND") {
+                return (
+                  <span key={label} className="inline-flex items-center gap-1 italic text-muted-foreground/70">
+                    <span>{label}:</span>
+                    <Ban className="h-3 w-3" />
+                    <span>No data available</span>
+                  </span>
+                );
+              }
+              return null;
+            };
+            const rows = [
+              detailRow("Company", replyProspect.company, "company"),
+              detailRow("Title", replyProspect.title, "title"),
+              detailRow("Phone", replyProspect.phone, "phone"),
+              detailRow("LinkedIn", replyProspect.linkedinUrl, "linkedinUrl"),
+              replyProspect.campaignName
+                ? <span key="campaign"><span className="text-muted-foreground">Campaign:</span> <span className="text-foreground">{String(replyProspect.campaignName)}</span></span>
+                : null,
+            ].filter(Boolean);
+            if (rows.length === 0) return null;
+            return (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs border-b border-border pb-3">
+                {rows}
+              </div>
+            );
+          })()}
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto space-y-4 min-h-0 py-2">
@@ -943,6 +1178,32 @@ export default function LeadsPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Enrich dialog — opens when user clicks the toolbar Enrich button.
+          Receives the currently selected prospects so the modal can compute
+          per-field "missing across selection" math client-side. */}
+      <EnrichDialog
+        open={enrichDialogOpen}
+        onOpenChange={setEnrichDialogOpen}
+        selected={prospects
+          .filter((pp) => selectedIds.has((pp as { id: string }).id))
+          .map((pp): EnrichDialogProspect => {
+            const r = pp as Record<string, unknown>;
+            return {
+              id: r.id as string,
+              email: r.email as string | null | undefined,
+              linkedinUrl: r.linkedinUrl as string | null | undefined,
+              phone: r.phone as string | null | undefined,
+              title: r.title as string | null | undefined,
+              company: r.company as string | null | undefined,
+              domain: r.domain as string | null | undefined,
+              enrichmentSource: r.enrichmentSource as EnrichDialogProspect["enrichmentSource"],
+            };
+          })}
+        hasBlitz={hasBlitz}
+        hasApollo={hasApollo}
+        onCleared={() => setSelectedIds(new Set())}
+      />
     </div>
   );
 }

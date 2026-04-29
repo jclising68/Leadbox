@@ -14,17 +14,49 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "sonner";
-import { Copy, Plus, Check, Loader2, Plug, Trash2, RefreshCw, Database, AlertTriangle, Power } from "lucide-react";
+import { Copy, Check, Loader2, Plug, Trash2, RefreshCw, Database, AlertTriangle, Power } from "lucide-react";
+import Image from "next/image";
+
+type ProviderId = "INSTANTLY" | "HEYREACH" | "BLITZ" | "APOLLO";
+
+const PROVIDERS: {
+  id: ProviderId;
+  name: string;
+  kind: "Inbound sync" | "Enrichment";
+  description: string;
+  logo: string;
+}[] = [
+  {
+    id: "INSTANTLY",
+    name: "Instantly.ai",
+    kind: "Inbound sync",
+    description: "Sync email replies and conversations from Instantly.",
+    logo: "/branding/instantly.png",
+  },
+  {
+    id: "HEYREACH",
+    name: "HeyReach",
+    kind: "Inbound sync",
+    description: "Sync LinkedIn replies and DMs from HeyReach.",
+    logo: "/branding/heyreach.png",
+  },
+  {
+    id: "BLITZ",
+    name: "Blitz",
+    kind: "Enrichment",
+    description: "Primary — verified emails + US mobile phones.",
+    logo: "/branding/blitz.jpeg",
+  },
+  {
+    id: "APOLLO",
+    name: "Apollo",
+    kind: "Enrichment",
+    description: "Fallback — global phones + richer firmographics.",
+    logo: "/branding/apollo.png",
+  },
+];
 
 function headers(wId: string) {
   return { "x-workspace-id": wId, "Content-Type": "application/json" };
@@ -34,10 +66,18 @@ export default function IntegrationsPage() {
   const workspaceId = useCurrentWorkspaceId();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [provider, setProvider] = useState("INSTANTLY");
+  const [provider, setProvider] = useState<ProviderId>("INSTANTLY");
   const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"available" | "connected" | null>(null);
+
+  function openAddDialog(p: ProviderId) {
+    setProvider(p);
+    setName("");
+    setApiKey("");
+    setOpen(true);
+  }
 
   const { data: integrations, isLoading } = useQuery({
     queryKey: ["integrations", workspaceId],
@@ -75,7 +115,12 @@ export default function IntegrationsPage() {
       setOpen(false);
       setName("");
       setApiKey("");
-      toast.success("Integration added! Syncing previous conversations in the background...");
+      const isOutbound = provider === "BLITZ" || provider === "APOLLO";
+      toast.success(
+        isOutbound
+          ? "Integration added! You can now use it to enrich leads."
+          : "Integration added! Syncing previous conversations in the background..."
+      );
     },
     onError: (err) => toast.error(err.message),
   });
@@ -189,85 +234,170 @@ export default function IntegrationsPage() {
     toast.success("Webhook URL copied to clipboard");
   }
 
+  const selectedProviderMeta = PROVIDERS.find((p) => p.id === provider) ?? PROVIDERS[0];
+  const connectedCount = integrations?.length ?? 0;
+  const resolvedTab: "available" | "connected" =
+    activeTab ?? (connectedCount > 0 ? "connected" : "available");
+
   return (
     <div className="max-w-3xl">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold">Integrations</h1>
-          <p className="text-sm text-muted-foreground">
-            Connect your outreach tools to receive messages
-          </p>
-        </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-            <Plus className="h-4 w-4" />
-            Add Integration
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add Integration</DialogTitle>
-              <DialogDescription>
-                Connect Instantly or HeyReach to receive messages
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Provider</Label>
-                <Select value={provider} onValueChange={(v) => v && setProvider(v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="INSTANTLY">Instantly.ai</SelectItem>
-                    <SelectItem value="HEYREACH">HeyReach</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Name</Label>
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g., Main Account"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>API Key</Label>
-                <Input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="Your API key"
-                />
-              </div>
-              <Button
-                className="w-full"
-                onClick={() => createMutation.mutate()}
-                disabled={!name || !apiKey || createMutation.isPending}
-              >
-                {createMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : null}
-                Add Integration
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+      <div className="mb-6">
+        <h1 className="text-xl font-semibold">Integrations</h1>
+        <p className="text-sm text-muted-foreground">
+          Connect outreach tools to sync messages, or enrichment providers to fill missing lead data on demand.
+        </p>
       </div>
 
+      <div className="mb-6 flex items-center gap-1 border-b border-border">
+        <button
+          onClick={() => setActiveTab("available")}
+          className={`relative flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
+            resolvedTab === "available"
+              ? "text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Available providers
+          {resolvedTab === "available" && (
+            <span className="absolute inset-x-0 -bottom-px h-0.5 bg-foreground" />
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("connected")}
+          className={`relative flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
+            resolvedTab === "connected"
+              ? "text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Connected
+          {connectedCount > 0 && (
+            <Badge
+              variant={resolvedTab === "connected" ? "default" : "secondary"}
+              className="text-[10px] h-5 px-1.5"
+            >
+              {connectedCount}
+            </Badge>
+          )}
+          {resolvedTab === "connected" && (
+            <span className="absolute inset-x-0 -bottom-px h-0.5 bg-foreground" />
+          )}
+        </button>
+      </div>
+
+      <Card className={`mb-8 ${resolvedTab === "available" ? "" : "hidden"}`}>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Available providers</CardTitle>
+          <CardDescription>Pick a tool to connect. You can add multiple accounts of the same provider.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {PROVIDERS.map((p) => {
+              const list = (integrations ?? []) as { provider: string }[];
+              const count = list.filter((i) => i.provider === p.id).length;
+              const isEnrichment = p.kind === "Enrichment";
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => openAddDialog(p.id)}
+                  className="group flex flex-col items-start text-left p-4 rounded-lg border bg-background hover:border-primary/50 hover:shadow-sm transition-all"
+                >
+                  <div className="flex items-center justify-between w-full mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-white border overflow-hidden">
+                        <Image src={p.logo} alt={p.name} width={28} height={28} className="object-contain" />
+                      </div>
+                      <span className="font-medium text-sm">{p.name}</span>
+                    </div>
+                    {count > 0 && (
+                      <Badge variant="secondary" className="text-[10px] h-5">
+                        {count}
+                      </Badge>
+                    )}
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] mb-2 ${isEnrichment ? "border-purple-500/40 text-purple-700 dark:text-purple-400" : "border-blue-500/40 text-blue-700 dark:text-blue-400"}`}
+                  >
+                    {p.kind}
+                  </Badge>
+                  <p className="text-xs text-muted-foreground mb-3 leading-snug">{p.description}</p>
+                  <div className="mt-auto text-[11px] font-medium text-primary group-hover:underline">
+                    {count === 0 ? "+ Add" : "+ Add another"}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <div className="flex h-6 w-6 items-center justify-center rounded bg-white border overflow-hidden">
+                <Image src={selectedProviderMeta.logo} alt={selectedProviderMeta.name} width={20} height={20} className="object-contain" />
+              </div>
+              Add {selectedProviderMeta.name}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedProviderMeta.kind === "Inbound sync"
+                ? "Syncs replies and conversations into your inbox."
+                : "Used to enrich missing lead data on demand from the Leads page."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g., Main Account"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>API Key</Label>
+              <Input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Your API key"
+              />
+            </div>
+            <Button
+              className="w-full"
+              onClick={() => createMutation.mutate()}
+              disabled={!name || !apiKey || createMutation.isPending}
+            >
+              {createMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : null}
+              Add {selectedProviderMeta.name}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Card className={resolvedTab === "connected" ? "" : "hidden"}>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Connected integrations</CardTitle>
+          <CardDescription>
+            {integrations?.length
+              ? `${integrations.length} ${integrations.length === 1 ? "integration" : "integrations"} connected to this workspace.`
+              : "No integrations connected yet — switch to Available providers to get started."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
       {isLoading ? (
-        <div className="flex justify-center py-12">
+        <div className="flex justify-center py-6">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
       ) : integrations?.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center py-12">
-            <Plug className="h-10 w-10 text-muted-foreground mb-3" />
-            <p className="text-sm text-muted-foreground">
-              No integrations connected yet
-            </p>
-          </CardContent>
-        </Card>
+        <div className="flex items-center gap-2 rounded-md border border-dashed bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+          <Plug className="h-4 w-4" />
+          Pick a provider above to connect your first integration.
+        </div>
       ) : (
         <div className="space-y-4">
           {integrations?.map(
@@ -299,11 +429,21 @@ export default function IntegrationsPage() {
               backfillCutoffDate?: string | null;
               backfillComplete?: boolean;
               oldestReached?: string | null;
-            }) => (
-              <Card key={int.id} className={!int.isActive ? "opacity-70" : ""}>
+            }) => {
+              const isInbound = int.provider === "INSTANTLY" || int.provider === "HEYREACH";
+              return (
+              <Card key={int.id} className={`bg-muted/20 shadow-none ${!int.isActive ? "opacity-70" : ""}`}>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
+                      {(() => {
+                        const meta = PROVIDERS.find((p) => p.id === int.provider);
+                        return meta ? (
+                          <div className="flex h-7 w-7 items-center justify-center rounded bg-white border overflow-hidden shrink-0">
+                            <Image src={meta.logo} alt={meta.name} width={24} height={24} className="object-contain" />
+                          </div>
+                        ) : null;
+                      })()}
                       <CardTitle className="text-base">{int.name}</CardTitle>
                       <Badge variant={int.isActive ? "default" : "secondary"}>
                         {int.provider}
@@ -326,55 +466,59 @@ export default function IntegrationsPage() {
                         <Power className="h-3 w-3 mr-1" />
                         {int.isActive ? "Disable" : "Enable"}
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => syncMutation.mutate(int.id)}
-                        disabled={syncingIds.has(int.id) || (int.syncing && !int.syncStuck) || !int.isActive}
-                      >
-                        {syncingIds.has(int.id) || (int.syncing && !int.syncStuck) ? (
-                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                        ) : (
-                          <RefreshCw className="h-3 w-3 mr-1" />
-                        )}
-                        Sync
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => enrichMutation.mutate(int.id)}
-                        disabled={
-                          enrichingIds.has(int.id) ||
-                          int.enriching ||
-                          (int.syncing && !int.syncStuck) ||
-                          syncingIds.has(int.id) ||
-                          !int.isActive
-                        }
-                        title={
-                          int.syncing && !int.syncStuck
-                            ? "Enrichment will be available once sync finishes"
-                            : undefined
-                        }
-                      >
-                        {enrichingIds.has(int.id) || int.enriching ? (
-                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                        ) : (
-                          <Database className="h-3 w-3 mr-1" />
-                        )}
-                        Enrich
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => testMutation.mutate(int.id)}
-                        disabled={testMutation.isPending}
-                      >
-                        {testMutation.isPending ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          "Test"
-                        )}
-                      </Button>
+                      {isInbound && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => syncMutation.mutate(int.id)}
+                            disabled={syncingIds.has(int.id) || (int.syncing && !int.syncStuck) || !int.isActive}
+                          >
+                            {syncingIds.has(int.id) || (int.syncing && !int.syncStuck) ? (
+                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                            ) : (
+                              <RefreshCw className="h-3 w-3 mr-1" />
+                            )}
+                            Sync
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => enrichMutation.mutate(int.id)}
+                            disabled={
+                              enrichingIds.has(int.id) ||
+                              int.enriching ||
+                              (int.syncing && !int.syncStuck) ||
+                              syncingIds.has(int.id) ||
+                              !int.isActive
+                            }
+                            title={
+                              int.syncing && !int.syncStuck
+                                ? "Enrichment will be available once sync finishes"
+                                : undefined
+                            }
+                          >
+                            {enrichingIds.has(int.id) || int.enriching ? (
+                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                            ) : (
+                              <Database className="h-3 w-3 mr-1" />
+                            )}
+                            Enrich
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => testMutation.mutate(int.id)}
+                            disabled={testMutation.isPending}
+                          >
+                            {testMutation.isPending ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              "Test"
+                            )}
+                          </Button>
+                        </>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
@@ -507,36 +651,49 @@ export default function IntegrationsPage() {
                     </div>
                   )}
                 </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">
-                      Webhook URL (paste this in {int.provider.toLowerCase() === "instantly" ? "Instantly" : "HeyReach"})
-                    </Label>
-                    <div className="flex gap-2">
-                      <Input
-                        readOnly
-                        value={int.webhookUrl}
-                        className="text-xs font-mono"
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => copyWebhookUrl(int.webhookUrl, int.id)}
-                      >
-                        {copied === int.id ? (
-                          <Check className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <Copy className="h-4 w-4" />
-                        )}
-                      </Button>
+                {isInbound ? (
+                  <CardContent>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">
+                        Webhook URL (paste this in {int.provider.toLowerCase() === "instantly" ? "Instantly" : "HeyReach"})
+                      </Label>
+                      <div className="flex gap-2">
+                        <Input
+                          readOnly
+                          value={int.webhookUrl}
+                          className="text-xs font-mono"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => copyWebhookUrl(int.webhookUrl, int.id)}
+                        >
+                          {copied === int.id ? (
+                            <Check className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                </CardContent>
+                  </CardContent>
+                ) : (
+                  <CardContent>
+                    <p className="text-xs text-muted-foreground">
+                      Used to enrich missing lead data on demand from the Leads page.
+                      {int.provider === "BLITZ" && " Tried first; covers verified emails and US mobile phones."}
+                      {int.provider === "APOLLO" && " Used as fallback when Blitz can't find a field; covers global phones and richer firmographics."}
+                    </p>
+                  </CardContent>
+                )}
               </Card>
-            )
+              );
+            }
           )}
         </div>
       )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
