@@ -49,3 +49,37 @@ These are non-negotiable. The user has been burned by each of these; violating t
 
 - This app will handle thousands of contacts — consider caching, pagination, and virtual scrolling for lists
 - Use Supabase RLS where appropriate for data isolation
+
+## File Organization
+
+New files must go in the right folder. If none of these fit, ask — don't drop it at repo root.
+
+| File type | Goes in |
+|---|---|
+| Next.js route / page / layout | `src/app/<route-group>/...` |
+| API route handler | `src/app/api/<domain>/route.ts` |
+| Cron handler | `src/app/api/cron/<job>/route.ts` (wire in `vercel.json`) |
+| Shared UI component | `src/components/...` |
+| Domain service (sync, enrichment, webhooks) | `src/services/<domain>.ts` |
+| External API client / util / helper | `src/lib/...` |
+| React hook | `src/hooks/...` |
+| Zustand store / client state | `src/stores/...` |
+| TypeScript type definitions | `src/types/...` |
+| Prisma schema / seed | `prisma/` |
+| DB migration | `prisma/migrations/` (generated, don't hand-edit) |
+| API probe / response-shape test | `scripts/tests/test-<provider>-<scope>.ts` |
+| One-off data fix / admin task | `scripts/ops/<action>.ts` |
+| Static asset (served via `/`) | `public/<category>/` (e.g. `public/branding/`) |
+| Favicon / PWA icon | `public/` root (browser convention requires it) |
+| Raw brand source (PSD, AI, unprocessed JPG) | `design/brand-source/` (not served) |
+| Agent definition | `.claude/agents/<name>.md` |
+| Skill definition | `.claude/skills/<name>/SKILL.md` |
+| Env file | Repo root only (`.env*`) |
+
+Rules:
+- **No loose files at repo root** unless tooling requires it there (configs, lockfiles, `.env*`, top-level `*.md` docs).
+- **No new top-level folders** without stating why — reorganization churn is expensive.
+- **No spaces in folder names.** Use kebab-case.
+- **Asset paths:** always under `/` when referenced from Next.js (`<Image src="/branding/logo-icon.png" />`).
+- **Scripts are not app code** — nothing in `src/` should import from `scripts/`.
+- **`design/` is not served** — anything in `public/` ships to the browser; raw source files belong in `design/`.

@@ -20,7 +20,7 @@ export function Logo({ iconOnly = false, className, priority = false }: LogoProp
   if (iconOnly) {
     return (
       <Image
-        src="/logo-icon.png"
+        src="/branding/logo-icon.png"
         alt="LeadBox"
         width={308}
         height={342}
@@ -34,7 +34,7 @@ export function Logo({ iconOnly = false, className, priority = false }: LogoProp
     <>
       {/* Light theme: dark text on light backgrounds */}
       <Image
-        src="/logo-light.png"
+        src="/branding/logo-light.png"
         alt="LeadBox"
         width={1001}
         height={248}
@@ -43,7 +43,7 @@ export function Logo({ iconOnly = false, className, priority = false }: LogoProp
       />
       {/* Dark theme: light text on dark backgrounds */}
       <Image
-        src="/logo-dark.png"
+        src="/branding/logo-dark.png"
         alt="LeadBox"
         width={1034}
         height={275}

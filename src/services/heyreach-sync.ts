@@ -207,7 +207,7 @@ async function fetchConversationsIncremental(
 // endpoint *claims* to include `correspondentProfile.tags` but in practice
 // always returns an empty array, so user-applied tags weren't reaching the
 // inbox. `/lead/GetTags` is the source of truth (confirmed against the
-// production API — see scripts/test-heyreach-tags-path.ts).
+// production API — see scripts/tests/test-heyreach-tags-path.ts).
 async function fetchTagsForLead(
   apiKey: string,
   profileUrl: string,
