@@ -34,7 +34,7 @@ export function Logo({ iconOnly = false, className, priority = false }: LogoProp
         className="h-10 w-10 shrink-0"
       />
       <span
-        className="font-[family-name:var(--font-inter)] text-2xl font-black tracking-tight text-foreground"
+        className="font-[family-name:var(--font-inter)] text-xl font-black tracking-tight text-foreground"
       >
         LEADBOX
       </span>

@@ -220,10 +220,11 @@ function EditableCell({
   className,
 }: {
   prospectId: string;
-  field: "notes" | "feedback";
+  field: "notes" | "feedback" | "campaignName";
   value: string;
   className?: string;
 }) {
+  const fieldLabel = field === "notes" ? "Notes" : field === "feedback" ? "Feedback" : "Campaign";
   const [editing, setEditing] = useState(false);
   const [localValue, setLocalValue] = useState(value);
   const [saving, setSaving] = useState(false);
@@ -264,7 +265,7 @@ function EditableCell({
         const err = await res.json().catch(() => ({ error: "Failed to save" }));
         throw new Error(err.error || "Failed to save");
       }
-      toast.success(`${field === "notes" ? "Notes" : "Feedback"} saved`);
+      toast.success(`${fieldLabel} saved`);
       // Invalidate to refetch fresh data
       await queryClient.invalidateQueries({ queryKey: ["prospects"] });
     } catch (err) {
@@ -313,7 +314,7 @@ function EditableCell({
         e.stopPropagation();
         setEditing(true);
       }}
-      title={display || `Click to add ${field}`}
+      title={display || `Click to add ${fieldLabel.toLowerCase()}`}
     >
       <span className={cn("truncate", !display && "text-muted-foreground italic")}>
         {display || "-"}
@@ -1032,9 +1033,15 @@ export default function LeadsPage() {
                     />
                   </div>
 
-                  {/* Campaign */}
-                  <div className="shrink-0 px-3 text-xs truncate text-muted-foreground" style={{ width: `${COLUMNS[12].w}px` }}>
-                    <CopyCell value={(p.campaignName as string) || (latestMsg?.campaignName as string) || "-"} />
+                  {/* Campaign — manual override of the message-derived value
+                      so users can fill it in when no provider data fetched. */}
+                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[12].w}px` }}>
+                    <EditableCell
+                      prospectId={p.id as string}
+                      field="campaignName"
+                      value={(p.campaignName as string) || (latestMsg?.campaignName as string) || ""}
+                      className="text-muted-foreground"
+                    />
                   </div>
 
                   {/* Step Replied */}
