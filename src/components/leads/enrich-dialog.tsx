@@ -225,7 +225,7 @@ export function EnrichDialog({ open, onOpenChange, selected, hasBlitz, hasApollo
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
@@ -257,6 +257,7 @@ export function EnrichDialog({ open, onOpenChange, selected, hasBlitz, hasApollo
           </div>
         ) : (
           <>
+            <div className="overflow-y-auto min-h-0 space-y-4 -mr-2 pr-2">
             <div className="space-y-2">
               {FIELD_DEFS.map((f) => {
                 const count = fetchableCounts[f.key];
@@ -368,6 +369,7 @@ export function EnrichDialog({ open, onOpenChange, selected, hasBlitz, hasApollo
                     ? "Blitz only — Apollo disabled for this run."
                     : "Apollo only — Blitz disabled for this run."}
               </div>
+            </div>
             </div>
 
             <Button
