@@ -18,6 +18,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -476,6 +481,7 @@ export default function LeadsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [showUnsubscribed, setShowUnsubscribed] = useState(false);
   const [replyProspect, setReplyProspect] = useState<Record<string, unknown> | null>(null);
   const [replyMessages, setReplyMessages] = useState<Record<string, unknown>[]>([]);
   const [replyLoading, setReplyLoading] = useState(false);
@@ -483,6 +489,7 @@ export default function LeadsPage() {
   const [enrichDialogOpen, setEnrichDialogOpen] = useState(false);
   const router = useRouter();
   const workspaceId = useCurrentWorkspaceId();
+  const queryClient = useQueryClient();
   const { setSelectedThread, setView, setSelectedLabel, clearFilters: clearInboxFilters } = useInboxStore();
   const { data: labels } = useLabels();
 
@@ -520,6 +527,42 @@ export default function LeadsPage() {
     });
   }, []);
 
+  const handleUnsubscribe = useCallback(async (prospectId: string, currentlyUnsubscribed: boolean) => {
+    const action = currentlyUnsubscribed ? "resubscribe" : "unsubscribe";
+    try {
+      const res = await fetch(`/api/prospects/${prospectId}/${action}`, {
+        method: "POST",
+        headers: workspaceId ? { "x-workspace-id": workspaceId } : {},
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" }));
+        throw new Error(err.error || "Request failed");
+      }
+      toast.success(currentlyUnsubscribed ? "Contact re-subscribed" : "Contact unsubscribed");
+      await queryClient.invalidateQueries({ queryKey: ["prospects"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  }, [workspaceId, queryClient]);
+
+  const handleBulkUnsubscribe = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    const results = await Promise.allSettled(
+      ids.map((id) =>
+        fetch(`/api/prospects/${id}/unsubscribe`, {
+          method: "POST",
+          headers: workspaceId ? { "x-workspace-id": workspaceId } : {},
+        })
+      )
+    );
+    const succeeded = results.filter((r) => r.status === "fulfilled").length;
+    const failed = results.filter((r) => r.status === "rejected").length;
+    if (succeeded > 0) toast.success(`${succeeded} contact${succeeded === 1 ? "" : "s"} unsubscribed`);
+    if (failed > 0) toast.error(`${failed} failed`);
+    setSelectedIds(new Set());
+    await queryClient.invalidateQueries({ queryKey: ["prospects"] });
+  }, [selectedIds, workspaceId, queryClient]);
+
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useProspects({
     search,
     sortBy: sort.field,
@@ -529,6 +572,7 @@ export default function LeadsPage() {
     dateFrom: dateFrom || undefined,
     dateTo: dateTo || undefined,
     leadStatus: statusFilter,
+    showUnsubscribed,
   });
 
   const prospects = useMemo(
@@ -602,6 +646,7 @@ export default function LeadsPage() {
   }, [workspaceId]);
 
   const hasFilters = !!labelFilter || !!channelFilter || !!dateFrom || !!dateTo || !!statusFilter;
+  const activeFilterCount = [!!channelFilter, !!labelFilter, !!statusFilter, !!(dateFrom || dateTo), showUnsubscribed].filter(Boolean).length;
 
   const filterTriggerBase =
     "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors focus:outline-none focus:ring-2 focus:ring-ring/40";
@@ -643,125 +688,227 @@ export default function LeadsPage() {
             )}
           </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger className={cn(
-              filterTriggerBase,
-              channelFilter ? filterTriggerActive : filterTriggerIdle
-            )}>
+          {/* Single unified Filters button */}
+          <Popover>
+            <PopoverTrigger
+              className={cn(
+                filterTriggerBase,
+                hasFilters || showUnsubscribed ? filterTriggerActive : filterTriggerIdle
+              )}
+            >
               <Filter className="h-3.5 w-3.5" />
-              <span>{channelFilter || "Channel"}</span>
+              <span>Filters</span>
+              {activeFilterCount > 0 && (
+                <span className="inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold">
+                  {activeFilterCount}
+                </span>
+              )}
               <ChevronDown className="h-3 w-3 opacity-70" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => setChannelFilter("")}>All</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setChannelFilter("EMAIL")}>
-                <Mail className="h-3.5 w-3.5 mr-2" /> Email
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setChannelFilter("LINKEDIN")}>
-                <Link2 className="h-3.5 w-3.5 mr-2" /> LinkedIn
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72 p-0" sideOffset={6}>
+              <div className="p-3 border-b border-border flex items-center justify-between">
+                <span className="text-sm font-medium">Filters</span>
+                <button
+                  onClick={() => { setLabelFilter(""); setChannelFilter(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); setShowUnsubscribed(false); }}
+                  className={cn(
+                    "text-xs transition-colors",
+                    hasFilters || showUnsubscribed
+                      ? "text-primary hover:text-primary/80"
+                      : "text-muted-foreground/40 cursor-default pointer-events-none"
+                  )}
+                >
+                  Clear all
+                </button>
+              </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger className={cn(
-              filterTriggerBase,
-              labelFilter ? filterTriggerActive : filterTriggerIdle
-            )}>
-              <Filter className="h-3.5 w-3.5" />
-              <span>{labelFilter || "Label"}</span>
-              <ChevronDown className="h-3 w-3 opacity-70" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => setLabelFilter("")}>All labels</DropdownMenuItem>
-              {labels?.map((l: { id: string; name: string; color: string }) => (
-                <DropdownMenuItem key={l.id} onClick={() => setLabelFilter(l.name)}>
-                  <span className="w-2.5 h-2.5 rounded-full mr-2" style={{ backgroundColor: l.color }} />
-                  {l.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+              {/* Channel */}
+              <div className="p-3 border-b border-border">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Channel</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {[{ label: "All", value: "" }, { label: "Email", value: "EMAIL" }, { label: "LinkedIn", value: "LINKEDIN" }].map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setChannelFilter(opt.value)}
+                      className={cn(
+                        "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs border transition-colors",
+                        channelFilter === opt.value
+                          ? "bg-primary/10 border-primary/30 text-foreground font-medium"
+                          : "bg-card border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                      )}
+                    >
+                      {opt.value === "EMAIL" && <Mail className="h-3 w-3" />}
+                      {opt.value === "LINKEDIN" && <Link2 className="h-3 w-3" />}
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger className={cn(
-              filterTriggerBase,
-              statusFilter ? filterTriggerActive : filterTriggerIdle
-            )}>
-              <Filter className="h-3.5 w-3.5" />
-              <span>{statusFilter || "Status"}</span>
-              <ChevronDown className="h-3 w-3 opacity-70" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => setStatusFilter("")}>All statuses</DropdownMenuItem>
-              {(labels || []).map((l: WorkspaceLabel) => (
-                <DropdownMenuItem key={l.id} onClick={() => setStatusFilter(l.name)}>
-                  <span className="w-2.5 h-2.5 rounded-full mr-2" style={{ backgroundColor: l.color }} />
-                  {l.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+              {/* Label */}
+              <div className="p-3 border-b border-border">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Label</p>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => setLabelFilter("")}
+                    className={cn(
+                      "inline-flex items-center px-2.5 py-1 rounded-md text-xs border transition-colors",
+                      !labelFilter
+                        ? "bg-primary/10 border-primary/30 text-foreground font-medium"
+                        : "bg-card border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                    )}
+                  >
+                    All
+                  </button>
+                  {(labels || []).map((l: WorkspaceLabel) => (
+                    <button
+                      key={l.id}
+                      onClick={() => setLabelFilter(labelFilter === l.name ? "" : l.name)}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border transition-colors",
+                        labelFilter === l.name
+                          ? "bg-primary/10 border-primary/30 text-foreground font-medium"
+                          : "bg-card border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                      )}
+                    >
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: l.color }} />
+                      {l.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger className={cn(
-              filterTriggerBase,
-              (dateFrom || dateTo) ? filterTriggerActive : filterTriggerIdle
-            )}>
-              <Calendar className="h-3.5 w-3.5" />
-              <span className="tabular-nums">
-                {dateFrom && dateTo ? `${dateFrom} - ${dateTo}` : dateFrom ? `From ${dateFrom}` : "Date"}
-              </span>
-              <ChevronDown className="h-3 w-3 opacity-70" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuItem onClick={() => { setDateFrom(""); setDateTo(""); }}>All time</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                const d = new Date(); d.setDate(d.getDate() - 7);
-                setDateFrom(d.toISOString().split("T")[0]); setDateTo(new Date().toISOString().split("T")[0]);
-              }}>Last 7 days</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                const d = new Date(); d.setDate(d.getDate() - 30);
-                setDateFrom(d.toISOString().split("T")[0]); setDateTo(new Date().toISOString().split("T")[0]);
-              }}>Last 30 days</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                const d = new Date(); d.setDate(d.getDate() - 90);
-                setDateFrom(d.toISOString().split("T")[0]); setDateTo(new Date().toISOString().split("T")[0]);
-              }}>Last 90 days</DropdownMenuItem>
-              <div className="border-t border-border my-1" />
-              <div className="px-3 py-2 space-y-3">
-                <span className="text-xs font-medium text-muted-foreground">Custom range</span>
-                <div className="grid grid-cols-2 gap-3">
+              {/* Status */}
+              <div className="p-3 border-b border-border">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Status</p>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => setStatusFilter("")}
+                    className={cn(
+                      "inline-flex items-center px-2.5 py-1 rounded-md text-xs border transition-colors",
+                      !statusFilter
+                        ? "bg-primary/10 border-primary/30 text-foreground font-medium"
+                        : "bg-card border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                    )}
+                  >
+                    All
+                  </button>
+                  {(labels || []).map((l: WorkspaceLabel) => (
+                    <button
+                      key={l.id}
+                      onClick={() => setStatusFilter(statusFilter === l.name ? "" : l.name)}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border transition-colors",
+                        statusFilter === l.name
+                          ? "bg-primary/10 border-primary/30 text-foreground font-medium"
+                          : "bg-card border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                      )}
+                    >
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: l.color }} />
+                      {l.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Date */}
+              <div className="p-3 border-b border-border">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Date</p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {[
+                    { label: "All time", days: 0 },
+                    { label: "Last 7 days", days: 7 },
+                    { label: "Last 30 days", days: 30 },
+                    { label: "Last 90 days", days: 90 },
+                  ].map((opt) => {
+                    const isActive = opt.days === 0 ? !dateFrom && !dateTo : (() => {
+                      const d = new Date(); d.setDate(d.getDate() - opt.days);
+                      return dateFrom === d.toISOString().split("T")[0];
+                    })();
+                    return (
+                      <button
+                        key={opt.label}
+                        onClick={() => {
+                          if (opt.days === 0) { setDateFrom(""); setDateTo(""); }
+                          else {
+                            const d = new Date(); d.setDate(d.getDate() - opt.days);
+                            setDateFrom(d.toISOString().split("T")[0]);
+                            setDateTo(new Date().toISOString().split("T")[0]);
+                          }
+                        }}
+                        className={cn(
+                          "inline-flex items-center px-2.5 py-1 rounded-md text-xs border transition-colors",
+                          isActive
+                            ? "bg-primary/10 border-primary/30 text-foreground font-medium"
+                            : "bg-card border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[11px] text-muted-foreground mb-1 block">Start date</label>
+                    <label className="text-[10px] text-muted-foreground mb-1 block">From</label>
                     <input
                       type="date"
-                      className="w-full text-xs bg-background text-foreground border border-input rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-ring/40"
+                      className="w-full text-xs bg-background text-foreground border border-input rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-ring/40"
                       value={dateFrom}
                       onChange={(e) => setDateFrom(e.target.value)}
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] text-muted-foreground mb-1 block">End date</label>
+                    <label className="text-[10px] text-muted-foreground mb-1 block">To</label>
                     <input
                       type="date"
-                      className="w-full text-xs bg-background text-foreground border border-input rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-ring/40"
+                      className="w-full text-xs bg-background text-foreground border border-input rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-ring/40"
                       value={dateTo}
                       onChange={(e) => setDateTo(e.target.value)}
                     />
                   </div>
                 </div>
-                {(dateFrom || dateTo) && (
-                  <button
-                    onClick={() => { setDateFrom(""); setDateTo(""); }}
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    Clear dates
-                  </button>
-                )}
               </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
+
+              {/* Unsubscribed */}
+              <div className="p-3">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Contacts</p>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => setShowUnsubscribed(false)}
+                    className={cn(
+                      "inline-flex items-center px-2.5 py-1 rounded-md text-xs border transition-colors",
+                      !showUnsubscribed
+                        ? "bg-primary/10 border-primary/30 text-foreground font-medium"
+                        : "bg-card border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                    )}
+                  >
+                    Active
+                  </button>
+                  <button
+                    onClick={() => setShowUnsubscribed(true)}
+                    className={cn(
+                      "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs border transition-colors",
+                      showUnsubscribed
+                        ? "bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-400 font-medium"
+                        : "bg-card border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                    )}
+                  >
+                    <Ban className="h-3 w-3" />
+                    Unsubscribed only
+                  </button>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {(hasFilters || showUnsubscribed) && (
+            <button
+              onClick={() => { setLabelFilter(""); setChannelFilter(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); setShowUnsubscribed(false); }}
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+            >
+              <X className="h-3 w-3" /> Clear
+            </button>
+          )}
 
           {selectedIds.size > 0 && (
             <div className="ml-auto flex items-center gap-2">
@@ -774,6 +921,14 @@ export default function LeadsPage() {
                   Setup needed
                 </span>
               )}
+              <button
+                onClick={handleBulkUnsubscribe}
+                title={`Unsubscribe ${selectedIds.size} selected contact${selectedIds.size === 1 ? "" : "s"}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-400 hover:bg-red-500/20"
+              >
+                <Ban className="h-3.5 w-3.5" />
+                Unsubscribe {selectedIds.size}
+              </button>
               <button
                 onClick={() => setEnrichDialogOpen(true)}
                 title={
@@ -789,18 +944,9 @@ export default function LeadsPage() {
                 )}
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                Enrich {selectedIds.size} lead{selectedIds.size === 1 ? "" : "s"}
+                Enrich {selectedIds.size}
               </button>
             </div>
-          )}
-
-          {hasFilters && (
-            <button
-              onClick={() => { setLabelFilter(""); setChannelFilter(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); }}
-              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-            >
-              <X className="h-3 w-3" /> Clear
-            </button>
           )}
         </div>
       </div>
@@ -931,7 +1077,8 @@ export default function LeadsPage() {
                   className={cn(
                     "flex items-center border-b border-border/60 text-sm transition-colors cursor-pointer text-foreground/90",
                     "hover:bg-accent/40",
-                    thread && (thread as Record<string, unknown>).isUnread ? "bg-primary/[0.04]" : ""
+                    p.isUnsubscribed ? "opacity-60" : "",
+                    !p.isUnsubscribed && thread && (thread as Record<string, unknown>).isUnread ? "bg-primary/[0.04]" : ""
                   )}
                   onClick={() => openReplyPopup(p)}
                 >
@@ -1073,6 +1220,26 @@ export default function LeadsPage() {
                       value={(p.feedback as string) || ""}
                       className="text-muted-foreground"
                     />
+                  </div>
+
+                  {/* Unsubscribe action — faint by default, full color on hover */}
+                  <div
+                    className="shrink-0 px-2 flex items-center justify-center"
+                    style={{ width: "36px" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={() => handleUnsubscribe(p.id as string, p.isUnsubscribed as boolean)}
+                      title={p.isUnsubscribed ? "Re-subscribe contact" : "Unsubscribe contact"}
+                      className={cn(
+                        "p-1 rounded transition-colors",
+                        p.isUnsubscribed
+                          ? "text-red-500 hover:bg-red-500/10"
+                          : "text-muted-foreground/25 hover:text-red-500 hover:bg-red-500/10"
+                      )}
+                    >
+                      <Ban className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </div>
               );

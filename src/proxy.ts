@@ -13,11 +13,12 @@ const { auth } = NextAuth(authConfig);
 export default auth((req) => {
   const { pathname } = req.nextUrl;
 
-  // Auth API, webhooks, and cron routes bypass the session check.
+  // Auth API, webhooks, cron, and MCP routes bypass the session check.
   if (
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/webhooks") ||
-    pathname.startsWith("/api/cron")
+    pathname.startsWith("/api/cron") ||
+    pathname.startsWith("/api/mcp")
   ) {
     return NextResponse.next();
   }
@@ -57,6 +58,6 @@ export const config = {
     // asset in /public (anything with a file extension like .png/.svg/.ico).
     // Without the extension carve-out, the auth guard would 307 image
     // requests to /login and break logos / favicons for signed-out users.
-    "/((?!_next/static|_next/image|api/webhooks|api/cron|.*\\.[\\w]+$).*)",
+    "/((?!_next/static|_next/image|api/webhooks|api/cron|api/mcp|.*\\.[\\w]+$).*)",
   ],
 };

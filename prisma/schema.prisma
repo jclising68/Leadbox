@@ -82,6 +82,7 @@ model Workspace {
   threads      Thread[]
   messages     Message[]
   webhookLogs  WebhookLog[]
+  apiKeys      WorkspaceApiKey[]
 }
 
 model WorkspaceMember {
@@ -102,6 +103,20 @@ enum Role {
   ADMIN
   MEMBER
   VIEWER
+}
+
+model WorkspaceApiKey {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  keyHash     String    @unique
+  keyPrefix   String
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 // ─── INTEGRATIONS ────────────────────────────────────
@@ -164,6 +179,8 @@ model Prospect {
   enrichmentSource  Json?
   emailStatus       String?
   enrichmentError   String?
+  isUnsubscribed    Boolean   @default(false)
+  unsubscribedAt    DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -176,6 +193,7 @@ model Prospect {
   @@index([workspaceId, updatedAt])
   @@index([workspaceId, domain])
   @@index([workspaceId, leadStatus])
+  @@index([workspaceId, isUnsubscribed])
 }
 
 model Thread {

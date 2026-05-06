@@ -116,9 +116,12 @@ export async function GET(req: NextRequest) {
   const hasReply = url.searchParams.get("hasReply");
   const actionable = url.searchParams.get("actionable");
   const leadStatusFilter = url.searchParams.get("leadStatus");
+  const showUnsubscribed = url.searchParams.get("showUnsubscribed") === "true";
 
   const where: Prisma.ProspectWhereInput = {
     workspaceId: workspaceId!,
+    // showUnsubscribed=true → only unsubscribed; default → only subscribed
+    isUnsubscribed: showUnsubscribed ? true : false,
   };
 
   if (search) {

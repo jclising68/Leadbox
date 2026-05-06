@@ -23,6 +23,7 @@ export function useProspects({
   dateFrom,
   dateTo,
   leadStatus = "",
+  showUnsubscribed = false,
 }: {
   search?: string;
   sortBy?: string;
@@ -33,12 +34,13 @@ export function useProspects({
   dateFrom?: string;
   dateTo?: string;
   leadStatus?: string;
+  showUnsubscribed?: boolean;
 } = {}) {
   const workspaceId = useCurrentWorkspaceId();
   const debouncedSearch = useDebounce(search, 300);
 
   return useInfiniteQuery({
-    queryKey: ["prospects", workspaceId, debouncedSearch, sortBy, sortDir, label, channel, domain, dateFrom, dateTo, leadStatus],
+    queryKey: ["prospects", workspaceId, debouncedSearch, sortBy, sortDir, label, channel, domain, dateFrom, dateTo, leadStatus, showUnsubscribed],
     queryFn: async ({ pageParam }) => {
       if (!workspaceId) return { prospects: [], nextCursor: null, hasMore: false };
 
@@ -52,6 +54,7 @@ export function useProspects({
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
       if (leadStatus) params.set("leadStatus", leadStatus);
+      if (showUnsubscribed) params.set("showUnsubscribed", "true");
       if (pageParam) params.set("cursor", pageParam);
       params.set("actionable", "true");
       params.set("limit", "100");
