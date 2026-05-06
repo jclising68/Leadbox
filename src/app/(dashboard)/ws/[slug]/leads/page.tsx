@@ -538,7 +538,20 @@ export default function LeadsPage() {
         const err = await res.json().catch(() => ({ error: "Request failed" }));
         throw new Error(err.error || "Request failed");
       }
-      toast.success(currentlyUnsubscribed ? "Contact re-subscribed" : "Contact unsubscribed");
+      if (currentlyUnsubscribed) {
+        toast.success("Contact re-subscribed");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        const sync = data?.instantlySync;
+        if (sync?.status === "ok") {
+          toast.success("Unsubscribed and synced to Instantly");
+        } else if (sync?.status === "failed") {
+          toast.warning(`Unsubscribed in LeadBox — Instantly sync failed: ${sync.reason}`);
+        } else {
+          // skipped — HeyReach contact or no campaign ID
+          toast.success("Contact unsubscribed (LinkedIn/HeyReach contact — no Instantly sync needed)");
+        }
+      }
       await queryClient.invalidateQueries({ queryKey: ["prospects"] });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
