@@ -66,18 +66,14 @@ export async function PATCH(req: NextRequest) {
       });
 
       if (label) {
-        // Remove all existing MANUAL labels from this thread first
-        const existingLabels = await prisma.threadLabel.findMany({
-          where: { threadId, source: "MANUAL" },
-          select: { id: true, labelId: true },
+        // When the user explicitly sets a tag, replace ALL existing MANUAL and
+        // WEBHOOK labels. WEBHOOK labels come from Instantly/HeyReach sync and
+        // setting a tag manually should override them.
+        await prisma.threadLabel.deleteMany({
+          where: { threadId, source: { in: ["MANUAL", "WEBHOOK"] }, labelId: { not: label.id } },
         });
-        for (const tl of existingLabels) {
-          if (tl.labelId !== label.id) {
-            await prisma.threadLabel.delete({ where: { id: tl.id } });
-          }
-        }
 
-        // Upsert the new label
+        // Upsert the new label as MANUAL (user-set takes precedence)
         await prisma.threadLabel.upsert({
           where: { threadId_labelId: { threadId, labelId: label.id } },
           update: { source: "MANUAL", appliedAt: new Date() },
@@ -85,9 +81,10 @@ export async function PATCH(req: NextRequest) {
         });
       }
     } else {
-      // Clearing the status — remove all MANUAL labels
+      // Clearing the status — remove MANUAL and WEBHOOK labels so the
+      // user can fully clear Instantly-synced classifications too.
       await prisma.threadLabel.deleteMany({
-        where: { threadId, source: "MANUAL" },
+        where: { threadId, source: { in: ["MANUAL", "WEBHOOK"] } },
       });
     }
 
@@ -157,14 +154,12 @@ export async function GET(req: NextRequest) {
     };
   }
 
-  // Always require at least one tag — leads section only shows tagged contacts.
-  // labelFilter narrows to a specific label; without it, any label qualifies.
-  where.thread = {
-    ...where.thread as Prisma.ThreadWhereInput,
-    threadLabels: labelFilter
-      ? { some: { label: { name: labelFilter } } }
-      : { some: {} },
-  };
+  if (labelFilter) {
+    where.thread = {
+      ...where.thread as Prisma.ThreadWhereInput,
+      threadLabels: { some: { label: { name: labelFilter }, source: { in: ["MANUAL", "WEBHOOK"] } } },
+    };
+  }
 
   // Show only "actionable" leads: those that replied OR have tags from
   // Instantly/HeyReach. Uses precise data signals — no hardcoded status lists.
