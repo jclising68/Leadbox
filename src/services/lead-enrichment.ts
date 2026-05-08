@@ -433,7 +433,10 @@ export async function enrichFromInstantly(
     const items = (data.items || []) as InstantlyLead[];
     pages++;
 
-    if (items.length === 0) break;
+    if (items.length === 0) {
+      cursor = undefined; // end-of-list — clear cursor so next run starts fresh
+      break;
+    }
     console.log(`[enrich] Page ${pages}: ${items.length} leads`);
 
     for (const lead of items) {
