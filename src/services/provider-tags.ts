@@ -126,6 +126,31 @@ const INSTANTLY_BASE = "https://api.instantly.ai/api/v2";
 type InstantlyTag = { id: string; label: string };
 type InstantlyLead = { id: string; email: string; custom_tag_ids?: string[] };
 
+// Confirmed from Instantly v2 API docs (GET /api-reference/lead/get-lead)
+const LABEL_TO_INTEREST_STATUS: Record<string, number> = {
+  "Interested":        1,
+  "Meeting Booked":    2,
+  "Meeting Completed": 3,
+  "Won":               4,
+  "Out of Office":     0,
+  "Not Interested":   -1,
+  "Wrong Person":     -2,
+  "Lost":             -3,
+  "No Show":          -4,
+};
+
+export const INTEREST_STATUS_TO_LABEL = new Map<number, string>([
+  [ 1, "Interested"],
+  [ 2, "Meeting Booked"],
+  [ 3, "Meeting Completed"],
+  [ 4, "Won"],
+  [ 0, "Out of Office"],
+  [-1, "Not Interested"],
+  [-2, "Wrong Person"],
+  [-3, "Lost"],
+  [-4, "No Show"],
+]);
+
 async function instantlyFetch(
   apiKey: string,
   path: string,
@@ -218,4 +243,19 @@ async function pushInstantlyTags(apiKey: string, email: string, desired: string[
       }),
     });
   }
+
+  // 4. Sync lt_interest_status — pick the first desired label that maps to a
+  // known Instantly interest status code and PATCH it onto the lead. This is
+  // what shows in the Unibox status column (custom-tags do not).
+  // null resets the lead to plain "Lead" (no interest status).
+  const interestCode = desired.reduce<number | null>((found, name) => {
+    if (found !== null) return found;
+    const code = LABEL_TO_INTEREST_STATUS[name];
+    return code !== undefined ? code : null;
+  }, null);
+
+  await instantlyFetch(apiKey, `/leads/${lead.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ lt_interest_status: interestCode }),
+  });
 }

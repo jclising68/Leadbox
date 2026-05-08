@@ -1029,7 +1029,10 @@ export default function LeadsPage() {
         ) : prospects.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <Users className="h-10 w-10 mb-3 opacity-40" />
-            <p className="text-sm">No leads found</p>
+            <p className="text-sm">{hasFilters ? "No leads match your filters" : "No tagged leads yet"}</p>
+            {!hasFilters && (
+              <p className="text-xs text-muted-foreground/60 mt-1">Contacts appear here once tagged in Instantly, HeyReach, or LeadBox</p>
+            )}
           </div>
         ) : (
           <div

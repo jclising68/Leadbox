@@ -2,6 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
 import { resolveThread } from "@/services/thread-resolver";
 import { updateSyncProgress } from "@/services/sync-progress";
+import { applyAutoLabel } from "@/services/auto-labeler";
+import { INTEREST_STATUS_TO_LABEL } from "@/services/provider-tags";
 import type { NormalizedWebhookPayload } from "@/types";
 
 const INSTANTLY_API_BASE = "https://api.instantly.ai/api/v2";
@@ -282,6 +284,52 @@ function emailToPayload(
   };
 }
 
+/**
+ * For each replied lead UUID we just processed, fetch lt_interest_status from
+ * Instantly and apply it as a WEBHOOK-source label in LeadBox. Only runs for
+ * leads whose status maps to a known built-in value (skips custom negatives).
+ * One GET /leads/{id} call per UUID — already within the 10 req/s budget.
+ */
+async function syncLeadStatuses(
+  workspaceId: string,
+  apiKey: string,
+  leadIds: Set<string>,
+): Promise<void> {
+  if (!leadIds.size) return;
+  console.log(`[sync] Syncing lt_interest_status for ${leadIds.size} replied lead(s)`);
+
+  for (const leadId of leadIds) {
+    await pacePerKey(apiKey);
+    try {
+      const res = await fetch(`${INSTANTLY_API_BASE}/leads/${leadId}`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!res.ok) continue;
+      const lead = await res.json() as { email?: string; lt_interest_status?: number };
+      const code = lead.lt_interest_status;
+      if (code === undefined || code === null) continue;
+      const labelName = INTEREST_STATUS_TO_LABEL.get(code);
+      if (!labelName) continue; // custom status — skip
+
+      // Find the thread for this prospect in this workspace
+      const thread = await prisma.thread.findFirst({
+        where: {
+          workspaceId,
+          prospect: { email: lead.email },
+        },
+        select: { id: true },
+        orderBy: { lastMessageAt: "desc" },
+      });
+      if (!thread) continue;
+
+      await applyAutoLabel(workspaceId, thread.id, labelName, 1.0, "WEBHOOK");
+      console.log(`[sync] Applied "${labelName}" to thread ${thread.id} from Instantly lt_interest_status=${code}`);
+    } catch (err) {
+      console.error(`[sync] Failed to sync status for lead ${leadId}:`, err instanceof Error ? err.message : err);
+    }
+  }
+}
+
 export async function syncInstantly(
   integrationId: string,
   /** Total milliseconds this sync is allowed to run. Defaults to 250s
@@ -370,6 +418,7 @@ export async function syncInstantly(
   let synced = 0;
   let skipped = emails.length - newEmails.length;
   let errors = 0;
+  const repliedLeadIds = new Set<string>();
 
   await updateSyncProgress(integrationId, {
     stage: "processing",
@@ -381,7 +430,7 @@ export async function syncInstantly(
 
   // Process sequentially to keep thread ordering stable.
   for (const email of newEmails) {
-    if (Date.now() - startTime > timeBudgetMs * 0.9) {
+    if (Date.now() - startTime > timeBudgetMs * 0.85) {
       console.log(`[sync] Time budget exhausted during processing, ${newEmails.length - synced - errors} emails deferred to next sync`);
       break;
     }
@@ -394,6 +443,10 @@ export async function syncInstantly(
       }
       await resolveThread(workspaceId, integrationId, payload);
       synced++;
+      // Collect replied lead UUIDs for status sync below
+      if (email.ue_type === 2 && email.lead) {
+        repliedLeadIds.add(email.lead);
+      }
     } catch (err) {
       errors++;
       if (errors <= 5) {
@@ -411,6 +464,9 @@ export async function syncInstantly(
       });
     }
   }
+
+  // Sync lt_interest_status from Instantly back to LeadBox for replied leads.
+  await syncLeadStatuses(workspaceId, apiKey, repliedLeadIds);
 
   // Re-read config — progress beats may have mutated it during this run.
   const freshRow = await prisma.integration.findUnique({

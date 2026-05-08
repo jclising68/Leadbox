@@ -157,12 +157,14 @@ export async function GET(req: NextRequest) {
     };
   }
 
-  if (labelFilter) {
-    where.thread = {
-      ...where.thread as Prisma.ThreadWhereInput,
-      threadLabels: { some: { label: { name: labelFilter } } },
-    };
-  }
+  // Always require at least one tag — leads section only shows tagged contacts.
+  // labelFilter narrows to a specific label; without it, any label qualifies.
+  where.thread = {
+    ...where.thread as Prisma.ThreadWhereInput,
+    threadLabels: labelFilter
+      ? { some: { label: { name: labelFilter } } }
+      : { some: {} },
+  };
 
   // Show only "actionable" leads: those that replied OR have tags from
   // Instantly/HeyReach. Uses precise data signals — no hardcoded status lists.

@@ -135,16 +135,14 @@ export async function applyAutoLabel(
 
   if (!label) return;
 
-  await prisma.threadLabel.upsert({
-    where: {
-      threadId_labelId: { threadId, labelId: label.id },
-    },
-    update: {
-      source,
-      confidence,
-      appliedAt: new Date(),
-    },
-    create: {
+  // Replace any previous auto-applied labels — only the latest classification
+  // should be active. MANUAL labels are never touched.
+  await prisma.threadLabel.deleteMany({
+    where: { threadId, source: { in: ["AUTO_AI", "WEBHOOK"] } },
+  });
+
+  await prisma.threadLabel.create({
+    data: {
       threadId,
       labelId: label.id,
       source,

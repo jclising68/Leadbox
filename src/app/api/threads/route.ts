@@ -72,16 +72,12 @@ export async function GET(req: NextRequest) {
   const andConditions: Prisma.ThreadWhereInput[] = [];
 
   // Default inbox view ("All messages" tab, OPEN status, no label selected):
-  // only show threads the prospect actually engaged with — has an INBOUND
-  // message OR has any tag/label applied. Sent-only threads with no reply or
-  // label are outbound-in-flight and belong in the leads tracker, not inbox.
+  // only show threads where the prospect actually replied (has an INBOUND message).
+  // Sent-only threads belong in the leads tracker, not inbox.
   // Label-tab clicks, Archive, Spam, Trash, and ALL views skip this filter.
   if (!labelId && (status === "OPEN" || !status)) {
     andConditions.push({
-      OR: [
-        { messages: { some: { direction: "INBOUND" } } },
-        { threadLabels: { some: {} } },
-      ],
+      messages: { some: { direction: "INBOUND" } },
     });
   }
 
