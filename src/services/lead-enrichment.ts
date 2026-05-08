@@ -558,17 +558,15 @@ export async function enrichFromInstantly(
           }
         }
 
-        // Apply labels (interest status + custom tags) to thread.
-        // Always replace — never accumulate. Clear previous AUTO_AI/WEBHOOK
-        // labels first so stale status codes don't persist across enrichment runs.
+        // Apply the Instantly Unibox status (lt_interest_status) as the single
+        // label for this thread. Custom tags are intentionally excluded — they
+        // accumulate additively in Instantly (old ones are never removed) so
+        // they cannot be used as a reliable "current label" signal.
         // MANUAL labels are preserved.
         if (threadId) {
           const labelsToApply = new Map<string, string>();
           if (interestLabel) {
             labelsToApply.set(interestLabel.toLowerCase(), interestLabel);
-          }
-          for (const tagName of customTagLabels) {
-            labelsToApply.set(tagName.toLowerCase(), tagName);
           }
 
           if (labelsToApply.size > 0) {
