@@ -1190,16 +1190,19 @@ export default function LeadsPage() {
                     <StatusCell
                       prospectId={p.id as string}
                       value={(() => {
+                        // Priority: manual leadStatus field (user-set) → threadLabel by source priority
                         const ls = (p.leadStatus as string) || "";
                         const wsLabels = labels || [];
-                        const lsIsWorkspaceLabel = ls
-                          ? wsLabels.some((l: WorkspaceLabel) => l.name.toLowerCase() === ls.toLowerCase())
-                          : false;
-                        if (lsIsWorkspaceLabel) return ls;
-                        const explicitLabel = threadLabels.find(
-                          (tl) => tl.source === "MANUAL" || tl.source === "WEBHOOK"
-                        );
-                        return explicitLabel?.label?.name || "";
+                        if (ls && wsLabels.some((l: WorkspaceLabel) => l.name.toLowerCase() === ls.toLowerCase())) {
+                          return ls;
+                        }
+                        // Mirror inbox: show the most authoritative label regardless of source.
+                        // MANUAL wins, then WEBHOOK (Instantly status), then AUTO_AI.
+                        const label =
+                          threadLabels.find((tl) => tl.source === "MANUAL") ||
+                          threadLabels.find((tl) => tl.source === "WEBHOOK") ||
+                          threadLabels.find((tl) => tl.source === "AUTO_AI");
+                        return label?.label?.name || "";
                       })()}
                       labels={labels || []}
                     />
