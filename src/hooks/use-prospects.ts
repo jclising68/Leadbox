@@ -56,7 +56,7 @@ export function useProspects({
       if (leadStatus) params.set("leadStatus", leadStatus);
       if (showUnsubscribed) params.set("showUnsubscribed", "true");
       if (pageParam) params.set("cursor", pageParam);
-      params.set("actionable", "true");
+      params.set("hasReply", "true");
       params.set("limit", "100");
 
       const res = await fetch(`/api/prospects?${params}`, {

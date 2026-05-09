@@ -157,7 +157,7 @@ export async function GET(req: NextRequest) {
   if (labelFilter) {
     where.thread = {
       ...where.thread as Prisma.ThreadWhereInput,
-      threadLabels: { some: { label: { name: labelFilter }, source: { in: ["MANUAL", "WEBHOOK"] } } },
+      threadLabels: { some: { label: { name: labelFilter } } },
     };
   }
 
