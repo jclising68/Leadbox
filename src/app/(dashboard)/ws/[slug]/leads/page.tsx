@@ -49,6 +49,7 @@ import {
   Pencil,
   Sparkles,
   Ban,
+  Trash2,
 } from "lucide-react";
 
 // Field-key shape for the source map; mirrors EnrichField in services/enrichment.ts.
@@ -569,6 +570,22 @@ export default function LeadsPage() {
     await queryClient.invalidateQueries({ queryKey: ["prospects"] });
   }, [selectedIds, workspaceId, queryClient]);
 
+  const handleTrashThread = useCallback(async (threadId: string) => {
+    try {
+      const res = await fetch(`/api/threads/${threadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(workspaceId ? { "x-workspace-id": workspaceId } : {}) },
+        body: JSON.stringify({ status: "TRASH" }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast.success("Moved to trash");
+      await queryClient.invalidateQueries({ queryKey: ["prospects"] });
+    } catch {
+      toast.error("Failed to move to trash");
+    }
+  }, [workspaceId, queryClient]);
+
+
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useProspects({
     search,
     sortBy: sort.field,
@@ -585,6 +602,32 @@ export default function LeadsPage() {
     () => data?.pages?.flatMap((p: { prospects: unknown[] }) => p.prospects) || [],
     [data]
   );
+
+  const handleBulkTrash = useCallback(async () => {
+    const selected = Array.from(selectedIds);
+    const threadIds = selected
+      .map((id) => {
+        const p = prospects.find((pp) => (pp as { id: string }).id === id) as { thread?: { id?: string } } | undefined;
+        return p?.thread?.id;
+      })
+      .filter(Boolean) as string[];
+    if (threadIds.length === 0) return;
+    const results = await Promise.allSettled(
+      threadIds.map((tid) =>
+        fetch(`/api/threads/${tid}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", ...(workspaceId ? { "x-workspace-id": workspaceId } : {}) },
+          body: JSON.stringify({ status: "TRASH" }),
+        })
+      )
+    );
+    const succeeded = results.filter((r) => r.status === "fulfilled").length;
+    const failed = results.filter((r) => r.status === "rejected").length;
+    if (succeeded > 0) toast.success(`${succeeded} contact${succeeded === 1 ? "" : "s"} moved to trash`);
+    if (failed > 0) toast.error(`${failed} failed`);
+    setSelectedIds(new Set());
+    await queryClient.invalidateQueries({ queryKey: ["prospects"] });
+  }, [selectedIds, prospects, workspaceId, queryClient]);
 
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -928,6 +971,14 @@ export default function LeadsPage() {
                 </span>
               )}
               <button
+                onClick={handleBulkTrash}
+                title={`Move ${selectedIds.size} selected contact${selectedIds.size === 1 ? "" : "s"} to trash`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors bg-muted border border-border text-muted-foreground hover:bg-destructive/10 hover:border-destructive/30 hover:text-destructive"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Trash {selectedIds.size}
+              </button>
+              <button
                 onClick={handleBulkUnsubscribe}
                 title={`Unsubscribe ${selectedIds.size} selected contact${selectedIds.size === 1 ? "" : "s"}`}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-400 hover:bg-red-500/20"
@@ -1261,6 +1312,23 @@ export default function LeadsPage() {
                     >
                       <Ban className="h-3.5 w-3.5" />
                     </button>
+                  </div>
+
+                  {/* Trash action */}
+                  <div
+                    className="shrink-0 px-2 flex items-center justify-center"
+                    style={{ width: "36px" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {!!thread?.id && (
+                      <button
+                        onClick={() => handleTrashThread(thread.id as string)}
+                        title="Move to trash"
+                        className="p-1 rounded transition-colors text-muted-foreground/25 hover:text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               );

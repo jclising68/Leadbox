@@ -119,6 +119,8 @@ export async function GET(req: NextRequest) {
     workspaceId: workspaceId!,
     // showUnsubscribed=true → only unsubscribed; default → only subscribed
     isUnsubscribed: showUnsubscribed ? true : false,
+    // Never surface trashed threads in the leads table
+    thread: { status: { not: "TRASH" } },
   };
 
   if (search) {

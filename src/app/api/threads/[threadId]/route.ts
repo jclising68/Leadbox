@@ -77,3 +77,28 @@ export async function PATCH(
 
   return NextResponse.json({ success: true });
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ threadId: string }> }
+) {
+  const { error, workspaceId } = await requireWorkspaceAccess(req, "MEMBER");
+  if (error) return error;
+
+  const { threadId } = await params;
+
+  // Verify ownership and get prospectId for cascade delete
+  const thread = await prisma.thread.findFirst({
+    where: { id: threadId, workspaceId: workspaceId! },
+    select: { prospectId: true },
+  });
+
+  if (!thread) {
+    return NextResponse.json({ error: "Thread not found" }, { status: 404 });
+  }
+
+  // Deleting the prospect cascades to Thread → Messages, ThreadLabels, AiDraft
+  await prisma.prospect.delete({ where: { id: thread.prospectId } });
+
+  return NextResponse.json({ success: true });
+}

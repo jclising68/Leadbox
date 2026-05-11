@@ -290,16 +290,42 @@ export function ThreadDetail() {
             )}
 
             {thread.status === "TRASH" && (
-              <Button
-                variant="ghost" size="sm" className="h-7 gap-1 text-xs" title="Restore"
-                onClick={() => {
-                  updateThread.mutate({ threadId: thread.id, data: { status: "OPEN" } });
-                  toast.success("Restored to inbox");
-                }}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                Restore
-              </Button>
+              <>
+                <Button
+                  variant="ghost" size="sm" className="h-7 gap-1 text-xs" title="Restore"
+                  onClick={() => {
+                    updateThread.mutate({ threadId: thread.id, data: { status: "OPEN" } });
+                    toast.success("Restored to inbox");
+                  }}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Restore
+                </Button>
+                <Button
+                  variant="ghost" size="sm"
+                  className="h-7 gap-1 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                  title="Permanently delete this contact and all messages"
+                  onClick={async () => {
+                    if (!confirm("Permanently delete this contact and all their messages? This cannot be undone.")) return;
+                    try {
+                      const res = await fetch(`/api/threads/${thread.id}`, {
+                        method: "DELETE",
+                        headers: workspaceId ? { "x-workspace-id": workspaceId } : {},
+                      });
+                      if (!res.ok) throw new Error("Failed");
+                      toast.success("Permanently deleted");
+                      setSelectedThread(null);
+                      queryClient.invalidateQueries({ queryKey: ["threads"] });
+                      queryClient.invalidateQueries({ queryKey: ["prospects"] });
+                    } catch {
+                      toast.error("Failed to delete");
+                    }
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete permanently
+                </Button>
+              </>
             )}
 
             <DropdownMenu>
