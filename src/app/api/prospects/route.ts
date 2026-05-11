@@ -119,8 +119,6 @@ export async function GET(req: NextRequest) {
     workspaceId: workspaceId!,
     // showUnsubscribed=true → only unsubscribed; default → only subscribed
     isUnsubscribed: showUnsubscribed ? true : false,
-    // Never surface trashed threads in the leads table
-    thread: { status: { not: "TRASH" } },
   };
 
   if (search) {
@@ -198,6 +196,10 @@ export async function GET(req: NextRequest) {
       lastMessageAt: dateFilter,
     };
   }
+
+  // Applied last, completely separate from where.thread, so no channel/label/date
+  // filter reassignment can accidentally drop it. Leads table never shows trashed contacts.
+  where.NOT = { thread: { status: "TRASH" } };
 
   // Build orderBy
   const validSortFields: Record<string, Prisma.ProspectOrderByWithRelationInput> = {
