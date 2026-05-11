@@ -3,6 +3,8 @@
 import { useThread, useUpdateThread, useAddLabel, useRemoveLabel, useSendReply } from "@/hooks/use-threads";
 import { useLabels } from "@/hooks/use-labels";
 import { useInboxStore } from "@/stores/inbox-store";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -15,6 +17,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   X,
+  Sparkles,
   Archive,
   Trash2,
   AlertCircle,
@@ -91,6 +94,8 @@ function ProviderBadge({ provider }: { provider?: string | null }) {
 
 export function ThreadDetail() {
   const { selectedThreadId, setSelectedThread } = useInboxStore();
+  const workspaceId = useCurrentWorkspaceId();
+  const queryClient = useQueryClient();
   const { data: thread, isLoading, refetch: refetchThread, isFetching: isRefetchingThread } = useThread(selectedThreadId);
   const { data: labels } = useLabels();
   const updateThread = useUpdateThread();
@@ -99,10 +104,39 @@ export function ThreadDetail() {
   const sendReply = useSendReply();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [replyText, setReplyText] = useState("");
+  const [draftApplied, setDraftApplied] = useState(false);
+
+  // Fetch AI draft for the current thread
+  const { data: aiDraft } = useQuery({
+    queryKey: ["ai-draft", selectedThreadId],
+    queryFn: async () => {
+      if (!workspaceId || !selectedThreadId) return null;
+      const res = await fetch(`/api/threads/${selectedThreadId}/draft`, {
+        headers: { "x-workspace-id": workspaceId },
+      });
+      if (!res.ok) return null;
+      return res.json() as Promise<{ id: string; body: string; status: string; model: string } | null>;
+    },
+    enabled: !!workspaceId && !!selectedThreadId,
+    refetchInterval: (query) => {
+      // Poll until draft is no longer PENDING
+      return query.state.data?.status === "PENDING" ? 3000 : false;
+    },
+    staleTime: 0,
+  });
+
+  // Pre-fill composer when a READY draft arrives and user hasn't typed anything
+  useEffect(() => {
+    if (aiDraft?.status === "READY" && !draftApplied && !replyText) {
+      setReplyText(aiDraft.body);
+      setDraftApplied(true);
+    }
+  }, [aiDraft?.status, aiDraft?.body, draftApplied, replyText]);
 
   // Clear reply draft when switching threads
   useEffect(() => {
     setReplyText("");
+    setDraftApplied(false);
   }, [selectedThreadId]);
 
   // Mark as read when viewing
@@ -436,9 +470,47 @@ export function ThreadDetail() {
 
         {/* Reply composer */}
         <div className="border-t border-border bg-card/40 px-4 py-3 shrink-0">
+          {/* AI Draft badge row */}
+          {aiDraft?.status === "PENDING" && (
+            <div className="flex items-center gap-1.5 mb-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Generating AI Draft…
+            </div>
+          )}
+          {aiDraft?.status === "READY" && draftApplied && (
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-500/10 text-violet-600 dark:text-violet-300 ring-1 ring-inset ring-violet-500/25">
+                <Sparkles className="h-2.5 w-2.5" />
+                AI Draft
+              </span>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                onClick={async () => {
+                  setReplyText("");
+                  setDraftApplied(false);
+                  if (workspaceId && selectedThreadId) {
+                    await fetch(`/api/threads/${selectedThreadId}/draft`, {
+                      method: "DELETE",
+                      headers: { "x-workspace-id": workspaceId },
+                    });
+                    queryClient.invalidateQueries({ queryKey: ["ai-draft", selectedThreadId] });
+                  }
+                }}
+              >
+                Discard
+              </button>
+            </div>
+          )}
           <textarea
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm min-h-[60px] max-h-[160px] resize-none focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring/60 placeholder:text-muted-foreground transition-colors"
-            placeholder={thread?.channel === "LINKEDIN" ? "Type your LinkedIn message..." : "Type your reply..."}
+            placeholder={
+              aiDraft?.status === "PENDING"
+                ? "AI is drafting a reply…"
+                : thread?.channel === "LINKEDIN"
+                ? "Type your LinkedIn message..."
+                : "Type your reply..."
+            }
             value={replyText}
             onChange={(e) => setReplyText(e.target.value)}
             onKeyDown={(e) => {
@@ -448,6 +520,7 @@ export function ThreadDetail() {
                   {
                     onSuccess: () => {
                       setReplyText("");
+                      setDraftApplied(false);
                       toast.success("Message sent");
                     },
                     onError: (err) => toast.error(err.message),
@@ -471,6 +544,7 @@ export function ThreadDetail() {
                   {
                     onSuccess: () => {
                       setReplyText("");
+                      setDraftApplied(false);
                       toast.success("Message sent");
                     },
                     onError: (err) => toast.error(err.message),

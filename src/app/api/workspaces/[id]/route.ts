@@ -25,9 +25,21 @@ export async function PATCH(
   const body = (await req.json()) as {
     name?: string;
     autoCreateLabels?: boolean;
+    aiReplyEnabled?: boolean;
+    aiReplyMode?: "HUMAN_IN_LOOP" | "AUTO_REPLY";
+    aiReplyProvider?: "openai" | "claude";
+    aiReplyInstructions?: string | null;
   };
 
-  const data: { name?: string; slug?: string; autoCreateLabels?: boolean } = {};
+  const data: {
+    name?: string;
+    slug?: string;
+    autoCreateLabels?: boolean;
+    aiReplyEnabled?: boolean;
+    aiReplyMode?: "HUMAN_IN_LOOP" | "AUTO_REPLY";
+    aiReplyProvider?: string | null;
+    aiReplyInstructions?: string | null;
+  } = {};
 
   if (body.name !== undefined) {
     if (!body.name) {
@@ -42,6 +54,22 @@ export async function PATCH(
 
   if (typeof body.autoCreateLabels === "boolean") {
     data.autoCreateLabels = body.autoCreateLabels;
+  }
+
+  if (typeof body.aiReplyEnabled === "boolean") {
+    data.aiReplyEnabled = body.aiReplyEnabled;
+  }
+
+  if (body.aiReplyMode === "HUMAN_IN_LOOP" || body.aiReplyMode === "AUTO_REPLY") {
+    data.aiReplyMode = body.aiReplyMode;
+  }
+
+  if (body.aiReplyProvider === "openai" || body.aiReplyProvider === "claude") {
+    data.aiReplyProvider = body.aiReplyProvider;
+  }
+
+  if (body.aiReplyInstructions !== undefined) {
+    data.aiReplyInstructions = body.aiReplyInstructions || null;
   }
 
   if (Object.keys(data).length === 0) {

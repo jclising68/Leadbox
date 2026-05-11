@@ -65,10 +65,19 @@ model Workspace {
   openaiKey    String?           // Encrypted OpenAI API key
   openaiKeyIv  String?
   openaiKeyTag String?
+  claudeKey    String?           // Encrypted Claude (Anthropic) API key
+  claudeKeyIv  String?
+  claudeKeyTag String?
   // When true (default), enrichment + webhook handlers auto-create a Label
   // for any unknown tag they encounter from Instantly/HeyReach. When false,
   // unknown tags are silently skipped — labels must be created manually.
   autoCreateLabels Boolean       @default(true)
+  // AI Reply Drafting — when enabled, an AI agent drafts a reply for every
+  // inbound message so the team only needs to review and send.
+  aiReplyEnabled      Boolean      @default(false)
+  aiReplyMode         AiReplyMode  @default(HUMAN_IN_LOOP)
+  aiReplyProvider     String?      // "openai" | "claude"
+  aiReplyInstructions String?      // custom persona / tone / goal injected into every draft prompt
   // Workspace-level transient state (e.g. enrichRunning flag for the
   // Blitz/Apollo enrichment background job). Treated as opaque Json so
   // small flags can be added without further migrations.
@@ -83,6 +92,12 @@ model Workspace {
   messages     Message[]
   webhookLogs  WebhookLog[]
   apiKeys      WorkspaceApiKey[]
+  aiDrafts     AiDraft[]
+}
+
+enum AiReplyMode {
+  HUMAN_IN_LOOP
+  AUTO_REPLY
 }
 
 model WorkspaceMember {
@@ -213,10 +228,36 @@ model Thread {
   prospect      Prospect     @relation(fields: [prospectId], references: [id], onDelete: Cascade)
   messages      Message[]
   threadLabels  ThreadLabel[]
+  aiDraft       AiDraft?
 
   @@index([workspaceId, status, lastMessageAt])
   @@index([workspaceId, isUnread])
   @@index([assignedTo])
+}
+
+// ─── AI REPLY DRAFTS ─────────────────────────────────
+
+model AiDraft {
+  id          String        @id @default(cuid())
+  threadId    String        @unique
+  workspaceId String
+  body        String        @default("")
+  model       String        @default("")
+  status      AiDraftStatus @default(PENDING)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  thread      Thread        @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+}
+
+enum AiDraftStatus {
+  PENDING
+  READY
+  DISCARDED
+  SENT
 }
 
 enum Channel {

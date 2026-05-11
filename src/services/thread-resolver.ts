@@ -7,6 +7,7 @@ type ResolvedThread = {
   thread: Thread;
   message: Message;
   isNewThread: boolean;
+  isNewMessage: boolean;
 };
 
 export async function resolveThread(
@@ -21,7 +22,7 @@ export async function resolveThread(
 
   // Wrap the entire resolve flow in a transaction for atomicity.
   // Increase timeout from default 5s to 30s — Supabase PgBouncer can be slow.
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     // 1. Find or create prospect
     const prospect = await findOrCreateProspect(tx, workspaceId, payload);
 
@@ -78,7 +79,7 @@ export async function resolveThread(
             campaignName: existing.campaignName ?? payload.campaignName,
           },
         });
-        return { prospect, thread, message: refreshed, isNewThread: false };
+        return { prospect, thread, message: refreshed, isNewThread: false, isNewMessage: false };
       }
     }
 
@@ -120,7 +121,7 @@ export async function resolveThread(
               sentAt: payload.sentAt ?? optimistic.sentAt,
             },
           });
-          return { prospect, thread, message: reconciled, isNewThread: false };
+          return { prospect, thread, message: reconciled, isNewThread: false, isNewMessage: false };
         }
       }
     }
@@ -186,9 +187,26 @@ export async function resolveThread(
       },
     });
 
-    return { prospect, thread, message, isNewThread };
+    return { prospect, thread, message, isNewThread, isNewMessage: true };
   }, { timeout: 30000 });
+
+  // Fire AI reply draft generation for genuinely new INBOUND messages.
+  // Non-blocking — runs in the background so it doesn't slow down sync or
+  // webhook response time. Works for both webhook-triggered and sync-triggered
+  // replies since all message creation flows through resolveThread.
+  if (result.isNewMessage && result.message.direction === "INBOUND") {
+    import("@/services/ai-reply-drafter")
+      .then(({ generateReplyDraft }) => {
+        generateReplyDraft(workspaceId, result.thread.id).catch((err) => {
+          console.error("[thread-resolver] AI draft generation failed:", err instanceof Error ? err.message : err);
+        });
+      })
+      .catch(() => {});
+  }
+
+  return result;
 }
+
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 

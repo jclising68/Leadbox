@@ -72,7 +72,10 @@ export async function POST(
   try {
     let result;
     if (thread.channel === "EMAIL") {
-      result = await replyViaInstantly(integration.id, threadId, body);
+      // Instantly expects HTML — convert plain-text newlines so spacing is
+      // preserved in the recipient's email client (bare \n is whitespace in HTML)
+      const bodyHtml = body.replace(/\n/g, "<br>");
+      result = await replyViaInstantly(integration.id, threadId, bodyHtml);
     } else {
       result = await replyViaHeyreach(integration.id, threadId, body);
     }

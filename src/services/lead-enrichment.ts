@@ -558,46 +558,52 @@ export async function enrichFromInstantly(
           }
         }
 
-        // Apply the Instantly Unibox status (lt_interest_status) as the single
-        // label for this thread. Custom tags are intentionally excluded — they
-        // accumulate additively in Instantly (old ones are never removed) so
-        // they cannot be used as a reliable "current label" signal.
-        // MANUAL labels are preserved.
+        // Apply labels (interest status + custom tags) to thread.
+        // Clear stale WEBHOOK labels first so contradictory labels from
+        // previous enrichment runs don't accumulate (e.g. Interested +
+        // Not Interested simultaneously). AUTO_AI labels from the classifier
+        // are left alone — they are managed by applyAutoLabel separately.
         if (threadId) {
           const labelsToApply = new Map<string, string>();
           if (interestLabel) {
             labelsToApply.set(interestLabel.toLowerCase(), interestLabel);
           }
+          for (const tagName of customTagLabels) {
+            labelsToApply.set(tagName.toLowerCase(), tagName);
+          }
 
           if (labelsToApply.size > 0) {
             await prisma.threadLabel.deleteMany({
-              where: { threadId, source: { in: ["AUTO_AI", "WEBHOOK"] } },
+              where: { threadId, source: "WEBHOOK" },
             });
+          }
 
-            for (const [lowerKey, labelName] of labelsToApply) {
-              let label = labelByName.get(lowerKey);
-              if (!label) {
-                if (!autoCreateLabels) {
-                  const found = await prisma.label.findUnique({
-                    where: { workspaceId_name: { workspaceId, name: labelName } },
-                    select: { id: true, name: true },
-                  });
-                  if (!found) continue;
-                  label = found;
-                } else {
-                  label = await prisma.label.upsert({
-                    where: { workspaceId_name: { workspaceId, name: labelName } },
-                    create: { workspaceId, name: labelName, color: colorForStatus(labelName) },
-                    update: {},
-                    select: { id: true, name: true },
-                  });
-                }
-                labelByName.set(lowerKey, label);
+          for (const [lowerKey, labelName] of labelsToApply) {
+            let label = labelByName.get(lowerKey);
+            if (!label) {
+              if (!autoCreateLabels) {
+                // Workspace has opted out of auto-label creation. Try a
+                // findUnique so a newly-manually-created label still gets
+                // picked up, but never create one here.
+                const found = await prisma.label.findUnique({
+                  where: { workspaceId_name: { workspaceId, name: labelName } },
+                  select: { id: true, name: true },
+                });
+                if (!found) continue;
+                label = found;
+              } else {
+                label = await prisma.label.upsert({
+                  where: { workspaceId_name: { workspaceId, name: labelName } },
+                  create: { workspaceId, name: labelName, color: colorForStatus(labelName) },
+                  update: {},
+                  select: { id: true, name: true },
+                });
               }
-              await prisma.threadLabel.create({
-                data: { threadId, labelId: label.id, source: "WEBHOOK", confidence: 1.0 },
-              });
+              labelByName.set(lowerKey, label);
             }
+            await prisma.threadLabel.create({
+              data: { threadId, labelId: label.id, source: "WEBHOOK", confidence: 1.0 },
+            });
           }
         }
       } catch (err) {

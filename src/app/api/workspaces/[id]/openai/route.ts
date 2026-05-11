@@ -32,3 +32,18 @@ export async function POST(
 
   return NextResponse.json({ success: true });
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params: _params }: { params: Promise<{ id: string }> }
+) {
+  const { error, workspaceId } = await requireWorkspaceAccess(req, "ADMIN");
+  if (error) return error;
+
+  await prisma.workspace.update({
+    where: { id: workspaceId! },
+    data: { openaiKey: null, openaiKeyIv: null, openaiKeyTag: null },
+  });
+
+  return NextResponse.json({ success: true });
+}
