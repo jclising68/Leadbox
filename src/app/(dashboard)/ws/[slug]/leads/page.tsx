@@ -475,6 +475,7 @@ export default function LeadsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [providerFilter, setProviderFilter] = useState("");
   const [showUnsubscribed, setShowUnsubscribed] = useState(false);
   const [replyProspect, setReplyProspect] = useState<Record<string, unknown> | null>(null);
   const [replyMessages, setReplyMessages] = useState<Record<string, unknown>[]>([]);
@@ -595,6 +596,7 @@ export default function LeadsPage() {
     sortDir: sort.dir,
     label: labelFilter,
     channel: channelFilter,
+    provider: providerFilter,
     dateFrom: dateFrom || undefined,
     dateTo: dateTo || undefined,
     leadStatus: statusFilter,
@@ -700,8 +702,8 @@ export default function LeadsPage() {
     }
   }, [workspaceId]);
 
-  const hasFilters = !!labelFilter || !!channelFilter || !!dateFrom || !!dateTo || !!statusFilter;
-  const activeFilterCount = [!!channelFilter, !!labelFilter, !!statusFilter, !!(dateFrom || dateTo), showUnsubscribed].filter(Boolean).length;
+  const hasFilters = !!labelFilter || !!channelFilter || !!dateFrom || !!dateTo || !!statusFilter || !!providerFilter;
+  const activeFilterCount = [!!channelFilter, !!labelFilter, !!statusFilter, !!(dateFrom || dateTo), !!providerFilter, showUnsubscribed].filter(Boolean).length;
 
   const filterTriggerBase =
     "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors focus:outline-none focus:ring-2 focus:ring-ring/40";
@@ -764,7 +766,7 @@ export default function LeadsPage() {
               <div className="p-3 border-b border-border flex items-center justify-between">
                 <span className="text-sm font-medium">Filters</span>
                 <button
-                  onClick={() => { setLabelFilter(""); setChannelFilter(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); setShowUnsubscribed(false); }}
+                  onClick={() => { setLabelFilter(""); setChannelFilter(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); setProviderFilter(""); setShowUnsubscribed(false); }}
                   className={cn(
                     "text-xs transition-colors",
                     hasFilters || showUnsubscribed
@@ -924,6 +926,32 @@ export default function LeadsPage() {
                 </div>
               </div>
 
+              {/* Source */}
+              <div className="p-3 border-b border-border">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Source</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { value: "INSTANTLY", src: "/branding/instantly.png", label: "Instantly" },
+                    { value: "HEYREACH",  src: "/branding/heyreach.png",  label: "HeyReach" },
+                    { value: "LEMLIST",   src: "/branding/lemlist.svg",   label: "Lemlist" },
+                  ].map((p) => (
+                    <button
+                      key={p.value}
+                      onClick={() => setProviderFilter(providerFilter === p.value ? "" : p.value)}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border transition-colors",
+                        providerFilter === p.value
+                          ? "bg-primary/10 border-primary/30 text-foreground font-medium"
+                          : "bg-card border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                      )}
+                    >
+                      <Image src={p.src} alt={p.label} width={12} height={12} className="object-contain" />
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Unsubscribed */}
               <div className="p-3">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Contacts</p>
@@ -958,7 +986,7 @@ export default function LeadsPage() {
 
           {(hasFilters || showUnsubscribed) && (
             <button
-              onClick={() => { setLabelFilter(""); setChannelFilter(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); setShowUnsubscribed(false); }}
+              onClick={() => { setLabelFilter(""); setChannelFilter(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); setProviderFilter(""); setShowUnsubscribed(false); }}
               className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
             >
               <X className="h-3 w-3" /> Clear

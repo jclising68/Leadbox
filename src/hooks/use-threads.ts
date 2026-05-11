@@ -35,11 +35,11 @@ function useDebounce(value: string, delay: number) {
 
 export function useThreads() {
   const workspaceId = useCurrentWorkspaceId();
-  const { view, selectedLabelId, searchQuery, filterChannel, filterUnread, filterHasReply, filterDateFrom, filterDateTo, sortDir } = useInboxStore();
+  const { view, selectedLabelId, searchQuery, filterChannel, filterProvider, filterUnread, filterHasReply, filterDateFrom, filterDateTo, sortDir } = useInboxStore();
   const debouncedSearch = useDebounce(searchQuery, 300);
 
   return useInfiniteQuery({
-    queryKey: ["threads", workspaceId, view, selectedLabelId, debouncedSearch, filterChannel, filterUnread, filterHasReply, filterDateFrom, filterDateTo, sortDir],
+    queryKey: ["threads", workspaceId, view, selectedLabelId, debouncedSearch, filterChannel, filterProvider, filterUnread, filterHasReply, filterDateFrom, filterDateTo, sortDir],
     queryFn: async ({ pageParam }) => {
       if (!workspaceId) return { threads: [], nextCursor: null, hasMore: false };
 
@@ -48,6 +48,7 @@ export function useThreads() {
       if (selectedLabelId) params.set("labelId", selectedLabelId);
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (filterChannel) params.set("channel", filterChannel);
+      if (filterProvider) params.set("provider", filterProvider);
       if (filterUnread) params.set("isUnread", "true");
       if (filterHasReply) params.set("hasReply", "true");
       if (filterDateFrom) params.set("dateFrom", filterDateFrom);

@@ -19,6 +19,7 @@ export function useProspects({
   sortDir = "desc",
   label = "",
   channel = "",
+  provider = "",
   domain = "",
   dateFrom,
   dateTo,
@@ -30,6 +31,7 @@ export function useProspects({
   sortDir?: string;
   label?: string;
   channel?: string;
+  provider?: string;
   domain?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -40,7 +42,7 @@ export function useProspects({
   const debouncedSearch = useDebounce(search, 300);
 
   return useInfiniteQuery({
-    queryKey: ["prospects", workspaceId, debouncedSearch, sortBy, sortDir, label, channel, domain, dateFrom, dateTo, leadStatus, showUnsubscribed],
+    queryKey: ["prospects", workspaceId, debouncedSearch, sortBy, sortDir, label, channel, provider, domain, dateFrom, dateTo, leadStatus, showUnsubscribed],
     queryFn: async ({ pageParam }) => {
       if (!workspaceId) return { prospects: [], nextCursor: null, hasMore: false };
 
@@ -50,6 +52,7 @@ export function useProspects({
       if (sortDir) params.set("sortDir", sortDir);
       if (label) params.set("label", label);
       if (channel) params.set("channel", channel);
+      if (provider) params.set("provider", provider);
       if (domain) params.set("domain", domain);
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);

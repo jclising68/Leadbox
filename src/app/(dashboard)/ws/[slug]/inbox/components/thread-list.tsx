@@ -55,6 +55,7 @@ export function ThreadList() {
   const {
     selectedThreadId, setSelectedThread, view,
     filterChannel, setFilterChannel,
+    filterProvider, setFilterProvider,
     filterUnread, setFilterUnread,
     filterHasReply, setFilterHasReply,
     filterDateFrom, setFilterDateFrom,
@@ -152,7 +153,7 @@ export function ThreadList() {
     }
   }, [selectedThreadId, threads, rowVirtualizer]);
 
-  const hasActiveFilters = !!filterChannel || filterUnread || filterHasReply || !!filterDateFrom || !!filterDateTo;
+  const hasActiveFilters = !!filterChannel || !!filterProvider || filterUnread || filterHasReply || !!filterDateFrom || !!filterDateTo;
 
   const viewTitle = view === "ARCHIVED" ? "Archive" : view === "SPAM" ? "Spam" : view === "TRASH" ? "Trash" : "All messages";
 
@@ -251,6 +252,26 @@ export function ThreadList() {
               <Link2 className="h-3 w-3 inline mr-1" />
               LinkedIn
             </button>
+            {/* Source (provider) filters */}
+            {[
+              { value: "INSTANTLY", src: "/branding/instantly.png", label: "Instantly" },
+              { value: "HEYREACH",  src: "/branding/heyreach.png",  label: "HeyReach" },
+              { value: "LEMLIST",   src: "/branding/lemlist.svg",   label: "Lemlist" },
+            ].map((p) => (
+              <button
+                key={p.value}
+                onClick={() => setFilterProvider(filterProvider === p.value ? null : p.value)}
+                className={cn(
+                  "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border transition-colors",
+                  filterProvider === p.value
+                    ? "bg-primary/10 border-primary/30 text-primary"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Image src={p.src} alt={p.label} width={10} height={10} className="object-contain" />
+                {p.label}
+              </button>
+            ))}
             <button
               onClick={() => setFilterUnread(!filterUnread)}
               className={cn(
@@ -343,7 +364,7 @@ export function ThreadList() {
           <div className="mt-1.5 flex items-center gap-1">
             <Filter className="h-3 w-3 text-muted-foreground" />
             <span className="text-[11px] text-muted-foreground">
-              Filters ({[filterChannel, filterUnread && "unread", filterHasReply && "reply", (filterDateFrom || filterDateTo) && "date"].filter(Boolean).length})
+              Filters ({[filterChannel, filterProvider, filterUnread && "unread", filterHasReply && "reply", (filterDateFrom || filterDateTo) && "date"].filter(Boolean).length})
             </span>
             <button onClick={clearFilters} className="text-muted-foreground hover:text-foreground">
               <X className="h-3 w-3" />

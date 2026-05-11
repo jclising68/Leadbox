@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
   const dateFrom = url.searchParams.get("dateFrom");
   const dateTo = url.searchParams.get("dateTo");
   const hasReply = url.searchParams.get("hasReply");
+  const provider = url.searchParams.get("provider");
   const sortDir = url.searchParams.get("sortDir") === "asc" ? "asc" : "desc";
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 100);
 
@@ -69,7 +70,19 @@ export async function GET(req: NextRequest) {
     where.messages = { some: { direction: "INBOUND" } };
   }
 
+
   const andConditions: Prisma.ThreadWhereInput[] = [];
+
+  if (provider) {
+    andConditions.push({ messages: { some: { integration: { provider: provider as "INSTANTLY" | "HEYREACH" | "LEMLIST" } } } });
+  }
+
+  // Exclude TRASH from every non-TRASH view. status filter alone isn't enough
+  // because channel/label filters can be applied while view="ALL" (no explicit
+  // status param), which would otherwise let TRASH threads slip through.
+  if (status !== "TRASH") {
+    andConditions.push({ status: { not: "TRASH" } });
+  }
 
   // Default inbox view ("All messages" tab, OPEN status, no label selected):
   // only show threads where the prospect actually replied (has an INBOUND message).

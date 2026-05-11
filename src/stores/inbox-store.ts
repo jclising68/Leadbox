@@ -12,6 +12,7 @@ type InboxStore = {
   searchQuery: string;
   sidebarCollapsed: boolean;
   filterChannel: string | null;
+  filterProvider: string | null;
   filterCampaign: string | null;
   filterUnread: boolean;
   filterHasReply: boolean;
@@ -24,6 +25,7 @@ type InboxStore = {
   setSearchQuery: (query: string) => void;
   toggleSidebar: () => void;
   setFilterChannel: (ch: string | null) => void;
+  setFilterProvider: (p: string | null) => void;
   setFilterCampaign: (c: string | null) => void;
   setFilterUnread: (u: boolean) => void;
   setFilterHasReply: (h: boolean) => void;
@@ -42,6 +44,7 @@ export const useInboxStore = create<InboxStore>()(
       searchQuery: "",
       sidebarCollapsed: false,
       filterChannel: null,
+      filterProvider: null,
       filterCampaign: null,
       filterUnread: false,
       filterHasReply: false,
@@ -54,13 +57,14 @@ export const useInboxStore = create<InboxStore>()(
       setSearchQuery: (query) => set({ searchQuery: query }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setFilterChannel: (ch) => set({ filterChannel: ch }),
+      setFilterProvider: (p) => set({ filterProvider: p }),
       setFilterCampaign: (c) => set({ filterCampaign: c }),
       setFilterUnread: (u) => set({ filterUnread: u }),
       setFilterHasReply: (h) => set({ filterHasReply: h }),
       setFilterDateFrom: (d) => set({ filterDateFrom: d }),
       setFilterDateTo: (d) => set({ filterDateTo: d }),
       setSortDir: (d) => set({ sortDir: d }),
-      clearFilters: () => set({ filterChannel: null, filterCampaign: null, filterUnread: false, filterHasReply: false, filterDateFrom: null, filterDateTo: null, searchQuery: "" }),
+      clearFilters: () => set({ filterChannel: null, filterProvider: null, filterCampaign: null, filterUnread: false, filterHasReply: false, filterDateFrom: null, filterDateTo: null, searchQuery: "" }),
     }),
     {
       name: "leadbox-inbox",

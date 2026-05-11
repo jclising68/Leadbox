@@ -111,6 +111,7 @@ export async function GET(req: NextRequest) {
   const dateFrom = url.searchParams.get("dateFrom");
   const dateTo = url.searchParams.get("dateTo");
   const hasReply = url.searchParams.get("hasReply");
+  const providerFilter = url.searchParams.get("provider");
   const actionable = url.searchParams.get("actionable");
   const leadStatusFilter = url.searchParams.get("leadStatus");
   const showUnsubscribed = url.searchParams.get("showUnsubscribed") === "true";
@@ -120,6 +121,12 @@ export async function GET(req: NextRequest) {
     // showUnsubscribed=true → only unsubscribed; default → only subscribed
     isUnsubscribed: showUnsubscribed ? true : false,
   };
+
+  // Isolated AND condition — never merged into where.thread so it can't be
+  // dropped by the channel/hasReply/label/date spread-chain below.
+  const andConditions: Prisma.ProspectWhereInput[] = [
+    { thread: { status: { not: "TRASH" } } },
+  ];
 
   if (search) {
     where.OR = [
@@ -161,25 +168,25 @@ export async function GET(req: NextRequest) {
     };
   }
 
+  if (providerFilter) {
+    andConditions.push({
+      thread: { messages: { some: { integration: { provider: providerFilter as "INSTANTLY" | "HEYREACH" | "LEMLIST" } } } },
+    });
+  }
+
   // Show only "actionable" leads: those that replied OR have tags from
   // Instantly/HeyReach. Uses precise data signals — no hardcoded status lists.
   //   1. Has INBOUND messages = lead replied
   //   2. Has WEBHOOK-source labels = tagged in Instantly/HeyReach
   //   3. stepReplied is set = enrichment confirmed reply from Instantly API
   if (actionable === "true") {
-    where.AND = [
-      ...(Array.isArray(where.AND) ? where.AND : []),
-      {
-        OR: [
-          // Lead replied (inbound message exists in thread)
-          { thread: { messages: { some: { direction: "INBOUND" } } } },
-          // Lead has been tagged in Instantly or HeyReach (WEBHOOK-source labels)
-          { thread: { threadLabels: { some: { source: "WEBHOOK" } } } },
-          // Enrichment confirmed reply via Instantly's email_reply_count
-          { stepReplied: { not: null } },
-        ],
-      },
-    ];
+    andConditions.push({
+      OR: [
+        { thread: { messages: { some: { direction: "INBOUND" } } } },
+        { thread: { threadLabels: { some: { source: "WEBHOOK" } } } },
+        { stepReplied: { not: null } },
+      ],
+    });
   }
 
   // Filter by specific lead status value
@@ -197,9 +204,8 @@ export async function GET(req: NextRequest) {
     };
   }
 
-  // Applied last, completely separate from where.thread, so no channel/label/date
-  // filter reassignment can accidentally drop it. Leads table never shows trashed contacts.
-  where.NOT = { thread: { status: "TRASH" } };
+  // Merge all AND conditions (TRASH exclusion is always first)
+  where.AND = andConditions;
 
   // Build orderBy
   const validSortFields: Record<string, Prisma.ProspectOrderByWithRelationInput> = {
