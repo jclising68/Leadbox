@@ -113,6 +113,13 @@ export async function GET(req: NextRequest) {
       prospect: true,
       threadLabels: { include: { label: true } },
       _count: { select: { messages: true } },
+      messages: {
+        take: 1,
+        // INBOUND before OUTBOUND so replies determine the provider icon,
+        // not whichever tool last bulk-synced outbound emails.
+        orderBy: [{ direction: "asc" as const }, { receivedAt: "desc" as const }],
+        select: { integration: { select: { provider: true } } },
+      },
     },
     orderBy: { lastMessageAt: sortDir },
     take: limit + 1,

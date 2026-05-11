@@ -4,7 +4,8 @@ import { useThreads } from "@/hooks/use-threads";
 import { useInboxStore } from "@/stores/inbox-store";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { cn } from "@/lib/utils";
-import { Mail, Link2, Loader2, Filter, X, SlidersHorizontal, Zap, Send, RefreshCw, Search, ArrowDownNarrowWide, ArrowUpNarrowWide } from "lucide-react";
+import { Mail, Link2, Loader2, Filter, X, SlidersHorizontal, RefreshCw, Search, ArrowDownNarrowWide, ArrowUpNarrowWide } from "lucide-react";
+import Image from "next/image";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useEffect, useMemo, useState } from "react";
@@ -29,6 +30,24 @@ function getInitials(firstName?: string | null, lastName?: string | null, email?
   if (firstName) return firstName.slice(0, 2).toUpperCase();
   if (email) return email.slice(0, 2).toUpperCase();
   return "??";
+}
+
+const PROVIDER_LOGOS: Record<string, { src: string; label: string }> = {
+  INSTANTLY: { src: "/branding/instantly.png", label: "Instantly" },
+  HEYREACH:  { src: "/branding/heyreach.png",  label: "HeyReach" },
+  LEMLIST:   { src: "/branding/lemlist.svg",   label: "Lemlist" },
+};
+
+function ThreadProviderIcon({ thread }: { thread: { channel?: string; messages?: Array<{ integration?: { provider?: string } }> } }) {
+  const provider = thread.messages?.[0]?.integration?.provider;
+  const resolved = provider || (thread.channel === "LINKEDIN" ? "HEYREACH" : thread.channel === "EMAIL" ? "INSTANTLY" : null);
+  const meta = resolved ? PROVIDER_LOGOS[resolved] : null;
+  if (!meta) return null;
+  return (
+    <span title={meta.label} className="shrink-0 inline-flex items-center justify-center w-3.5 h-3.5 rounded-sm bg-white border border-border overflow-hidden">
+      <Image src={meta.src} alt={meta.label} width={10} height={10} className="object-contain" />
+    </span>
+  );
 }
 
 export function ThreadList() {
@@ -461,15 +480,7 @@ export function ThreadList() {
                             >
                               {name}
                             </span>
-                            {thread.channel === "LINKEDIN" ? (
-                              <span className="shrink-0 w-3.5 h-3.5 rounded-sm flex items-center justify-center bg-teal-500/15 ring-1 ring-inset ring-teal-500/20">
-                                <Send className="h-2 w-2 text-teal-600 dark:text-teal-300" />
-                              </span>
-                            ) : (
-                              <span className="shrink-0 w-3.5 h-3.5 rounded-sm flex items-center justify-center bg-blue-500/15 ring-1 ring-inset ring-blue-500/25">
-                                <Zap className="h-2 w-2 text-blue-600 dark:text-blue-300" />
-                              </span>
-                            )}
+                            <ThreadProviderIcon thread={thread} />
                           </div>
                           <span
                             className="text-[11px] text-muted-foreground shrink-0 tabular-nums"
