@@ -72,22 +72,26 @@ function DetailRow({ icon: Icon, label, value }: { icon: React.ElementType; labe
 
 function ProviderBadge({ provider }: { provider?: string | null }) {
   if (!provider) return null;
-  const isInstantly = provider === "INSTANTLY";
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ring-1 ring-inset",
-        isInstantly
-          ? "bg-blue-500/10 text-blue-600 dark:text-blue-300 ring-blue-500/25"
-          : "bg-teal-500/10 text-teal-600 dark:text-teal-300 ring-teal-500/25"
-      )}
-    >
-      {isInstantly ? (
+  if (provider === "INSTANTLY") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ring-1 ring-inset bg-blue-500/10 text-blue-600 dark:text-blue-300 ring-blue-500/25">
         <Zap className="h-2.5 w-2.5" />
-      ) : (
-        <Send className="h-2.5 w-2.5" />
-      )}
-      {isInstantly ? "Instantly" : "HeyReach"}
+        Instantly
+      </span>
+    );
+  }
+  if (provider === "LEMLIST") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ring-1 ring-inset bg-orange-500/10 text-orange-600 dark:text-orange-400 ring-orange-500/25">
+        <Mail className="h-2.5 w-2.5" />
+        Lemlist
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ring-1 ring-inset bg-teal-500/10 text-teal-600 dark:text-teal-300 ring-teal-500/25">
+      <Send className="h-2.5 w-2.5" />
+      HeyReach
     </span>
   );
 }
@@ -180,8 +184,11 @@ export function ThreadDetail() {
     ? `${thread.prospect.firstName || ""} ${thread.prospect.lastName || ""}`.trim()
     : thread.prospect.email || "Unknown";
 
-  // Get provider from first message
-  const primaryProvider = thread.messages?.[0]?.integration?.provider;
+  // Prefer the provider from an INBOUND reply (who they responded to),
+  // fall back to the oldest message (original acquisition tool).
+  const primaryProvider =
+    thread.messages?.find((m: { direction: string }) => m.direction === "INBOUND")?.integration?.provider
+    ?? thread.messages?.[0]?.integration?.provider;
 
   return (
     <div className="flex-1 flex h-full overflow-hidden">

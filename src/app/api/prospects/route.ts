@@ -227,7 +227,11 @@ export async function GET(req: NextRequest) {
           },
           messages: {
             take: 1,
-            orderBy: { receivedAt: "desc" },
+            // INBOUND sorts before OUTBOUND in the Direction enum declaration,
+            // so replies always take priority over sent emails for the provider
+            // icon — prevents a Lemlist bulk-send from overwriting an Instantly
+            // reply's icon just because it was synced more recently.
+            orderBy: [{ direction: "asc" }, { receivedAt: "desc" }],
             select: {
               campaignName: true,
               integration: { select: { provider: true } },

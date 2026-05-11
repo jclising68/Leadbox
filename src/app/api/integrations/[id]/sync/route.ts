@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
+import { syncLemlist } from "@/services/lemlist-sync";
 import { markSyncStartedFresh, STALE_LOCK_MS, updateSyncProgress } from "@/services/sync-progress";
 import { after } from "next/server";
 import { workspaceJson } from "@/lib/api-response";
@@ -73,9 +74,9 @@ export async function POST(
     return NextResponse.json({ error: "Integration not found" }, { status: 404 });
   }
 
-  if (integration.provider !== "INSTANTLY" && integration.provider !== "HEYREACH") {
+  if (!["INSTANTLY", "HEYREACH", "LEMLIST"].includes(integration.provider)) {
     return NextResponse.json(
-      { error: `Sync is not supported for ${integration.provider}. Only Instantly and HeyReach pull threads/messages.` },
+      { error: `Sync is not supported for ${integration.provider}. Only Instantly, HeyReach, and Lemlist pull threads/messages.` },
       { status: 400 },
     );
   }
@@ -99,7 +100,10 @@ export async function POST(
     // Manual sync runs sync-only; enrichment goes through its own route / cron
     // because sync + enrich together exceed Vercel's 300s function limit.
     // Provider was validated above, so this is safe.
-    const syncFn = integration.provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
+    const syncFn =
+      integration.provider === "INSTANTLY" ? syncInstantly :
+      integration.provider === "HEYREACH"  ? syncHeyreach :
+      syncLemlist;
     let syncError: string | null = null;
     try {
       const result = await syncFn(integration.id);

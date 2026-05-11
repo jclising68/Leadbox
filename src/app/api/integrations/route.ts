@@ -6,6 +6,7 @@ import { encrypt, maskApiKey, decrypt } from "@/lib/crypto";
 import { v4 as uuid } from "uuid";
 import { syncInstantly, testInstantlyConnection } from "@/services/instantly-sync";
 import { syncHeyreach, testHeyreachConnection } from "@/services/heyreach-sync";
+import { syncLemlist, testLemlistConnection } from "@/services/lemlist-sync";
 import { STALE_LOCK_MS, type SyncProgress } from "@/services/sync-progress";
 
 // Initial sync + enrichment can take a while for large accounts
@@ -116,7 +117,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!["INSTANTLY", "HEYREACH", "BLITZ", "APOLLO"].includes(provider)) {
+  if (!["INSTANTLY", "HEYREACH", "LEMLIST", "BLITZ", "APOLLO"].includes(provider)) {
     return NextResponse.json(
       { error: "Invalid provider" },
       { status: 400 }
@@ -127,11 +128,12 @@ export async function POST(req: NextRequest) {
   // dedicated test endpoints). For BLITZ/APOLLO, skip the test — they're
   // outbound-only and the enrichment flow surfaces auth errors clearly on
   // first use, so we don't burn a credit on a precautionary test call.
-  if (provider === "INSTANTLY" || provider === "HEYREACH") {
+  if (provider === "INSTANTLY" || provider === "HEYREACH" || provider === "LEMLIST") {
     try {
-      const isValid = provider === "INSTANTLY"
-        ? await testInstantlyConnection(apiKey)
-        : await testHeyreachConnection(apiKey);
+      const isValid =
+        provider === "INSTANTLY" ? await testInstantlyConnection(apiKey) :
+        provider === "HEYREACH"  ? await testHeyreachConnection(apiKey) :
+        await testLemlistConnection(apiKey);
 
       if (!isValid) {
         return NextResponse.json(
@@ -163,14 +165,47 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // For Lemlist: auto-register the webhook so events arrive in real-time
+  // without requiring the user to copy/paste a URL into their dashboard.
+  if (provider === "LEMLIST") {
+    try {
+      const webhookUrl = `${appUrl}/api/webhooks/lemlist?workspace_id=${workspaceId}&secret=${webhookSecret}`;
+      const hookRes = await fetch(
+        `https://api.lemlist.com/api/hooks?access_token=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targetUrl: webhookUrl, type: "emailsReplied" }),
+        }
+      );
+      if (hookRes.ok) {
+        const hook = (await hookRes.json()) as { _id?: string };
+        if (hook._id) {
+          await prisma.integration.update({
+            where: { id: integration.id },
+            data: { config: { lemlistWebhookId: hook._id } },
+          });
+        }
+      } else {
+        console.warn(`[integration] Lemlist webhook register returned ${hookRes.status} — sync will still work`);
+      }
+    } catch (err) {
+      console.error(`[integration] Failed to auto-register Lemlist webhook:`, err);
+      // Non-fatal — cron sync still works without it
+    }
+  }
+
   // Trigger historical sync in background. Enrichment is explicitly NOT run
   // here — sync+enrich together exceed Vercel's 300s function limit for
   // large accounts. User can click Enrich once initial sync completes, or
   // the next cron tick will pick it up. BLITZ/APOLLO are outbound-only
   // (no inbound sync) so we skip this.
-  if (provider === "INSTANTLY" || provider === "HEYREACH") {
+  if (provider === "INSTANTLY" || provider === "HEYREACH" || provider === "LEMLIST") {
     after(async () => {
-      const syncFn = provider === "INSTANTLY" ? syncInstantly : syncHeyreach;
+      const syncFn =
+        provider === "INSTANTLY" ? syncInstantly :
+        provider === "HEYREACH"  ? syncHeyreach :
+        syncLemlist;
       try {
         const result = await syncFn(integration.id);
         console.log(`[sync] Initial sync done for ${integration.id}: ${result.synced} synced`);

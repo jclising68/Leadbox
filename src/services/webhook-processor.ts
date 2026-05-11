@@ -110,6 +110,40 @@ function mapInstantlyEventToLabel(eventType: string): string | undefined {
   return map[eventType] || undefined;
 }
 
+// Maps Lemlist activity types to normalized format
+export function normalizeLemlistWebhook(
+  payload: Record<string, unknown>
+): NormalizedWebhookPayload {
+  const type = (payload.type as string) || "";
+  const isOutbound = type === "emailsSent";
+
+  return {
+    provider: "LEMLIST",
+    eventType: type,
+    direction: isOutbound ? "OUTBOUND" : "INBOUND",
+    channel: "EMAIL",
+    prospectEmail: (payload.leadEmail as string) || (payload.email as string),
+    prospectFirstName: payload.leadFirstName as string | undefined,
+    prospectLastName: payload.leadLastName as string | undefined,
+    prospectCompany: payload.leadCompanyName as string | undefined,
+    subject: payload.subject as string | undefined,
+    // bodyText/bodyHtml will be overwritten by webhook handler after MCP fetch
+    bodyText: payload.messagePreview as string | undefined,
+    bodyHtml: undefined,
+    fromEmail: isOutbound
+      ? ((payload.sendUserEmail as string) || (payload.sendUserMailboxProviderId as string))
+      : (payload.fromEmail as string) || (payload.leadEmail as string),
+    toEmail: isOutbound
+      ? ((payload.leadEmail as string) || (payload.email as string))
+      : ((payload.sendUserEmail as string) || (payload.sendUserMailboxProviderId as string)),
+    externalId: payload._id as string | undefined,
+    campaignId: payload.campaignId as string | undefined,
+    campaignName: (payload.campaignName as string) || (payload.name as string),
+    sentAt: payload.createdAt ? new Date(payload.createdAt as string) : undefined,
+    rawPayload: payload,
+  };
+}
+
 function mapHeyreachEventToLabel(eventType: string): string | undefined {
   const map: Record<string, string> = {
     MESSAGE_REPLY_RECEIVED: "", // Let AI classify

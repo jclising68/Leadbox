@@ -447,9 +447,8 @@ function StatusCell({
   );
 }
 
-// Provider icon component - Instantly blue bolt, HeyReach teal send
+// Provider icon component - Instantly blue bolt, HeyReach teal send, Lemlist orange mail
 function ProviderIcon({ provider, channel }: { provider: string | null; channel?: string | null }) {
-  // Determine provider from explicit provider, or fall back to channel type
   const resolved = provider || (channel === "LINKEDIN" ? "HEYREACH" : channel === "EMAIL" ? "INSTANTLY" : null);
   if (!resolved) return <span className="text-muted-foreground/60 text-[10px]">-</span>;
 
@@ -460,6 +459,16 @@ function ProviderIcon({ provider, channel }: { provider: string | null; channel?
         className="inline-flex items-center justify-center w-5 h-5 rounded-sm bg-blue-500/15 ring-1 ring-inset ring-blue-500/25"
       >
         <Zap className="h-3 w-3 text-blue-600 dark:text-blue-300" />
+      </span>
+    );
+  }
+  if (resolved === "LEMLIST") {
+    return (
+      <span
+        title="Lemlist"
+        className="inline-flex items-center justify-center w-5 h-5 rounded-sm bg-orange-500/15 ring-1 ring-inset ring-orange-500/25"
+      >
+        <Mail className="h-3 w-3 text-orange-500 dark:text-orange-400" />
       </span>
     );
   }

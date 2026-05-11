@@ -19,7 +19,7 @@ import { toast } from "sonner";
 import { Copy, Check, Loader2, Plug, Trash2, RefreshCw, Database, AlertTriangle, Power } from "lucide-react";
 import Image from "next/image";
 
-type ProviderId = "INSTANTLY" | "HEYREACH" | "BLITZ" | "APOLLO";
+type ProviderId = "INSTANTLY" | "HEYREACH" | "LEMLIST" | "BLITZ" | "APOLLO";
 
 const PROVIDERS: {
   id: ProviderId;
@@ -41,6 +41,13 @@ const PROVIDERS: {
     kind: "Inbound sync",
     description: "Sync LinkedIn replies and DMs from HeyReach.",
     logo: "/branding/heyreach.png",
+  },
+  {
+    id: "LEMLIST",
+    name: "Lemlist",
+    kind: "Inbound sync",
+    description: "Sync email replies from Lemlist campaigns.",
+    logo: "/branding/lemlist.svg",
   },
   {
     id: "BLITZ",
@@ -430,7 +437,8 @@ export default function IntegrationsPage() {
               backfillComplete?: boolean;
               oldestReached?: string | null;
             }) => {
-              const isInbound = int.provider === "INSTANTLY" || int.provider === "HEYREACH";
+              const isInbound = int.provider === "INSTANTLY" || int.provider === "HEYREACH" || int.provider === "LEMLIST";
+              const supportsEnrich = int.provider === "INSTANTLY" || int.provider === "HEYREACH";
               return (
               <Card key={int.id} className={`bg-muted/20 shadow-none ${!int.isActive ? "opacity-70" : ""}`}>
                 <CardHeader className="pb-3">
@@ -481,30 +489,32 @@ export default function IntegrationsPage() {
                             )}
                             Sync
                           </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => enrichMutation.mutate(int.id)}
-                            disabled={
-                              enrichingIds.has(int.id) ||
-                              int.enriching ||
-                              (int.syncing && !int.syncStuck) ||
-                              syncingIds.has(int.id) ||
-                              !int.isActive
-                            }
-                            title={
-                              int.syncing && !int.syncStuck
-                                ? "Enrichment will be available once sync finishes"
-                                : undefined
-                            }
-                          >
-                            {enrichingIds.has(int.id) || int.enriching ? (
-                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                            ) : (
-                              <Database className="h-3 w-3 mr-1" />
-                            )}
-                            Enrich
-                          </Button>
+                          {supportsEnrich && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => enrichMutation.mutate(int.id)}
+                              disabled={
+                                enrichingIds.has(int.id) ||
+                                int.enriching ||
+                                (int.syncing && !int.syncStuck) ||
+                                syncingIds.has(int.id) ||
+                                !int.isActive
+                              }
+                              title={
+                                int.syncing && !int.syncStuck
+                                  ? "Enrichment will be available once sync finishes"
+                                  : undefined
+                              }
+                            >
+                              {enrichingIds.has(int.id) || int.enriching ? (
+                                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                              ) : (
+                                <Database className="h-3 w-3 mr-1" />
+                              )}
+                              Enrich
+                            </Button>
+                          )}
                           <Button
                             variant="outline"
                             size="sm"
@@ -655,7 +665,9 @@ export default function IntegrationsPage() {
                   <CardContent>
                     <div className="space-y-2">
                       <Label className="text-xs text-muted-foreground">
-                        Webhook URL (paste this in {int.provider.toLowerCase() === "instantly" ? "Instantly" : "HeyReach"})
+                        {int.provider === "LEMLIST"
+                          ? "Webhook URL (auto-registered with Lemlist)"
+                          : `Webhook URL (paste this in ${int.provider === "INSTANTLY" ? "Instantly" : "HeyReach"})`}
                       </Label>
                       <div className="flex gap-2">
                         <Input

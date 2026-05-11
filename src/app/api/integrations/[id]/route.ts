@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
+import { decrypt } from "@/lib/crypto";
 
 type PatchBody = {
   isActive?: boolean;
@@ -89,11 +90,28 @@ export async function DELETE(
 
   const integration = await prisma.integration.findFirst({
     where: { id, workspaceId: workspaceId! },
-    select: { id: true },
+    select: { id: true, provider: true, config: true, apiKeyEncrypted: true, apiKeyIv: true, apiKeyTag: true },
   });
 
   if (!integration) {
     return NextResponse.json({ error: "Integration not found" }, { status: 404 });
+  }
+
+  // For Lemlist: delete the auto-registered webhook before removing the row
+  if (integration.provider === "LEMLIST") {
+    const config = (integration.config as Record<string, unknown>) ?? {};
+    const webhookId = config.lemlistWebhookId as string | undefined;
+    if (webhookId) {
+      try {
+        const apiKey = decrypt(integration.apiKeyEncrypted, integration.apiKeyIv, integration.apiKeyTag);
+        await fetch(`https://api.lemlist.com/api/hooks/${webhookId}?access_token=${apiKey}`, {
+          method: "DELETE",
+        });
+      } catch (err) {
+        console.error(`[integration] Failed to delete Lemlist webhook ${webhookId}:`, err);
+        // Non-fatal — proceed with row deletion
+      }
+    }
   }
 
   await prisma.integration.delete({ where: { id } });

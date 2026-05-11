@@ -27,7 +27,7 @@ export type InboxFilter = {
 };
 
 export type NormalizedWebhookPayload = {
-  provider: "INSTANTLY" | "HEYREACH";
+  provider: "INSTANTLY" | "HEYREACH" | "LEMLIST";
   eventType: string;
   direction: "INBOUND" | "OUTBOUND";
   channel: "EMAIL" | "LINKEDIN";

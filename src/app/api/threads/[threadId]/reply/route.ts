@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { replyViaInstantly } from "@/services/instantly-reply";
 import { replyViaHeyreach } from "@/services/heyreach-reply";
+import { replyViaLemlist } from "@/services/lemlist-reply";
 
 export async function POST(
   req: NextRequest,
@@ -46,24 +47,22 @@ export async function POST(
 
   // Fallback: if the original integration was deleted/disabled, find any active one for this channel
   if (!integration) {
-    const providerForChannel =
-      thread.channel === "EMAIL" ? "INSTANTLY" : "HEYREACH";
-
     integration = await prisma.integration.findFirst({
       where: {
         workspaceId: workspaceId!,
-        provider: providerForChannel,
+        provider: thread.channel === "EMAIL"
+          ? { in: ["INSTANTLY", "LEMLIST"] }
+          : { equals: "HEYREACH" },
         isActive: true,
       },
     });
   }
 
   if (!integration) {
-    const providerForChannel =
-      thread.channel === "EMAIL" ? "INSTANTLY" : "HEYREACH";
+    const providerDesc = thread.channel === "EMAIL" ? "Instantly or Lemlist" : "HeyReach";
     return NextResponse.json(
       {
-        error: `No active ${providerForChannel} integration found. Add one in Settings > Integrations.`,
+        error: `No active ${providerDesc} integration found. Add one in Settings > Integrations.`,
       },
       { status: 400 }
     );
@@ -72,10 +71,13 @@ export async function POST(
   try {
     let result;
     if (thread.channel === "EMAIL") {
-      // Instantly expects HTML — convert plain-text newlines so spacing is
-      // preserved in the recipient's email client (bare \n is whitespace in HTML)
+      // Both Instantly and Lemlist expect HTML; convert plain-text newlines
       const bodyHtml = body.replace(/\n/g, "<br>");
-      result = await replyViaInstantly(integration.id, threadId, bodyHtml);
+      if (integration.provider === "LEMLIST") {
+        result = await replyViaLemlist(integration.id, threadId, bodyHtml);
+      } else {
+        result = await replyViaInstantly(integration.id, threadId, bodyHtml);
+      }
     } else {
       result = await replyViaHeyreach(integration.id, threadId, body);
     }

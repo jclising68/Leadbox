@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
+import { syncLemlist } from "@/services/lemlist-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
 import { STALE_LOCK_MS } from "@/services/sync-progress";
 
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
   // Sweeping them here previously routed Blitz/Apollo keys into syncHeyreach
   // and 401'd against /Campaign/GetAll on every cron tick.
   const integrations = await prisma.integration.findMany({
-    where: { isActive: true, provider: { in: ["INSTANTLY", "HEYREACH"] } },
+    where: { isActive: true, provider: { in: ["INSTANTLY", "HEYREACH", "LEMLIST"] } },
     select: { id: true, provider: true, workspaceId: true, config: true },
     orderBy: { lastSyncAt: "asc" }, // Prioritize least-recently synced
   });
@@ -92,11 +93,10 @@ export async function GET(req: NextRequest) {
           console.log(`[cron] Syncing ${integration.provider} ${integration.id} (sync ${SYNC_BUDGET_MS / 1000}s + enrich ${ENRICH_BUDGET_MS / 1000}s)`);
 
           const syncFn =
-            integration.provider === "INSTANTLY"
-              ? syncInstantly
-              : integration.provider === "HEYREACH"
-              ? syncHeyreach
-              : null;
+            integration.provider === "INSTANTLY" ? syncInstantly :
+            integration.provider === "HEYREACH"  ? syncHeyreach :
+            integration.provider === "LEMLIST"   ? syncLemlist :
+            null;
           if (!syncFn) {
             // Defense in depth — the where-clause above filters non-inbound
             // providers, but if a future provider gets added without a

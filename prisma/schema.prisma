@@ -160,6 +160,7 @@ model Integration {
 enum Provider {
   INSTANTLY
   HEYREACH
+  LEMLIST
   BLITZ
   APOLLO
 }
