@@ -579,7 +579,10 @@ export default function LeadsPage() {
       });
       if (!res.ok) throw new Error("Failed");
       toast.success("Moved to trash");
-      await queryClient.invalidateQueries({ queryKey: ["prospects"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["prospects"] }),
+        queryClient.invalidateQueries({ queryKey: ["threads"] }),
+      ]);
     } catch {
       toast.error("Failed to move to trash");
     }
@@ -626,7 +629,10 @@ export default function LeadsPage() {
     if (succeeded > 0) toast.success(`${succeeded} contact${succeeded === 1 ? "" : "s"} moved to trash`);
     if (failed > 0) toast.error(`${failed} failed`);
     setSelectedIds(new Set());
-    await queryClient.invalidateQueries({ queryKey: ["prospects"] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["prospects"] }),
+      queryClient.invalidateQueries({ queryKey: ["threads"] }),
+    ]);
   }, [selectedIds, prospects, workspaceId, queryClient]);
 
   const parentRef = useRef<HTMLDivElement>(null);
