@@ -29,6 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { EnrichDialog, type EnrichDialogProspect } from "@/components/leads/enrich-dialog";
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -38,13 +39,11 @@ import {
   Mail,
   Link2,
   Loader2,
-  Zap,
   ArrowUpDown,
   Filter,
   X,
   Users,
   Copy,
-  Send,
   Calendar,
   Check,
   Pencil,
@@ -447,37 +446,22 @@ function StatusCell({
   );
 }
 
-// Provider icon component - Instantly blue bolt, HeyReach teal send, Lemlist orange mail
+const PROVIDER_LOGOS: Record<string, { src: string; label: string }> = {
+  INSTANTLY: { src: "/branding/instantly.png", label: "Instantly" },
+  HEYREACH:  { src: "/branding/heyreach.png",  label: "HeyReach" },
+  LEMLIST:   { src: "/branding/lemlist.svg",   label: "Lemlist" },
+};
+
 function ProviderIcon({ provider, channel }: { provider: string | null; channel?: string | null }) {
   const resolved = provider || (channel === "LINKEDIN" ? "HEYREACH" : channel === "EMAIL" ? "INSTANTLY" : null);
-  if (!resolved) return <span className="text-muted-foreground/60 text-[10px]">-</span>;
-
-  if (resolved === "INSTANTLY") {
-    return (
-      <span
-        title="Instantly"
-        className="inline-flex items-center justify-center w-5 h-5 rounded-sm bg-blue-500/15 ring-1 ring-inset ring-blue-500/25"
-      >
-        <Zap className="h-3 w-3 text-blue-600 dark:text-blue-300" />
-      </span>
-    );
-  }
-  if (resolved === "LEMLIST") {
-    return (
-      <span
-        title="Lemlist"
-        className="inline-flex items-center justify-center w-5 h-5 rounded-sm bg-orange-500/15 ring-1 ring-inset ring-orange-500/25"
-      >
-        <Mail className="h-3 w-3 text-orange-500 dark:text-orange-400" />
-      </span>
-    );
-  }
+  const meta = resolved ? PROVIDER_LOGOS[resolved] : null;
+  if (!meta) return <span className="text-muted-foreground/60 text-[10px]">-</span>;
   return (
     <span
-      title="HeyReach"
-      className="inline-flex items-center justify-center w-5 h-5 rounded-sm bg-teal-500/15 ring-1 ring-inset ring-teal-500/20"
+      title={meta.label}
+      className="inline-flex items-center justify-center w-5 h-5 rounded-sm bg-white border border-border overflow-hidden"
     >
-      <Send className="h-3 w-3 text-teal-600 dark:text-teal-300" />
+      <Image src={meta.src} alt={meta.label} width={16} height={16} className="object-contain" />
     </span>
   );
 }

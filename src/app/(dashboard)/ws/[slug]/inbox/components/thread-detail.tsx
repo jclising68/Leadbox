@@ -14,6 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 import {
   X,
@@ -70,28 +71,20 @@ function DetailRow({ icon: Icon, label, value }: { icon: React.ElementType; labe
   );
 }
 
+const PROVIDER_META: Record<string, { src: string; label: string }> = {
+  INSTANTLY: { src: "/branding/instantly.png", label: "Instantly" },
+  HEYREACH:  { src: "/branding/heyreach.png",  label: "HeyReach" },
+  LEMLIST:   { src: "/branding/lemlist.svg",   label: "Lemlist" },
+};
+
 function ProviderBadge({ provider }: { provider?: string | null }) {
   if (!provider) return null;
-  if (provider === "INSTANTLY") {
-    return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ring-1 ring-inset bg-blue-500/10 text-blue-600 dark:text-blue-300 ring-blue-500/25">
-        <Zap className="h-2.5 w-2.5" />
-        Instantly
-      </span>
-    );
-  }
-  if (provider === "LEMLIST") {
-    return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ring-1 ring-inset bg-orange-500/10 text-orange-600 dark:text-orange-400 ring-orange-500/25">
-        <Mail className="h-2.5 w-2.5" />
-        Lemlist
-      </span>
-    );
-  }
+  const meta = PROVIDER_META[provider];
+  if (!meta) return null;
   return (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ring-1 ring-inset bg-teal-500/10 text-teal-600 dark:text-teal-300 ring-teal-500/25">
-      <Send className="h-2.5 w-2.5" />
-      HeyReach
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ring-1 ring-inset bg-muted/60 text-muted-foreground ring-border">
+      <Image src={meta.src} alt={meta.label} width={12} height={12} className="object-contain" />
+      {meta.label}
     </span>
   );
 }
