@@ -78,6 +78,7 @@ model Workspace {
   aiReplyMode         AiReplyMode  @default(HUMAN_IN_LOOP)
   aiReplyProvider     String?      // "openai" | "claude"
   aiReplyInstructions String?      // custom persona / tone / goal injected into every draft prompt
+  aiLabelProvider     String?      // "openai" | "claude" — which provider powers AI Labeling
   // Workspace-level transient state (e.g. enrichRunning flag for the
   // Blitz/Apollo enrichment background job). Treated as opaque Json so
   // small flags can be added without further migrations.

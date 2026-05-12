@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
 import { CLASSIFICATION_PROMPT } from "@/lib/constants";
@@ -8,30 +9,55 @@ type ClassificationResult = {
   confidence: number;
 };
 
+const VALID_LABELS = [
+  "INTERESTED",
+  "NOT_INTERESTED",
+  "MEETING_BOOKED",
+  "QUALIFYING",
+  "WRONG_PERSON",
+  "OUT_OF_OFFICE",
+  "MAYBE_FUTURE",
+  "AUTO_REPLY",
+  "NEUTRAL",
+] as const;
+
 export async function classifyMessage(
   workspaceId: string,
   messageId: string
 ): Promise<ClassificationResult | null> {
-  // Get workspace OpenAI key
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
+    select: {
+      aiLabelProvider: true,
+      openaiKey: true, openaiKeyIv: true, openaiKeyTag: true,
+      claudeKey: true, claudeKeyIv: true, claudeKeyTag: true,
+    },
   });
 
+  const provider = workspace?.aiLabelProvider ?? "openai";
+
+  if (provider === "claude") {
+    if (!workspace?.claudeKey || !workspace.claudeKeyIv || !workspace.claudeKeyTag) {
+      const globalKey = process.env.ANTHROPIC_API_KEY;
+      if (!globalKey) return null;
+      return classifyWithClaude(globalKey, messageId);
+    }
+    const apiKey = decrypt(workspace.claudeKey, workspace.claudeKeyIv, workspace.claudeKeyTag);
+    return classifyWithClaude(apiKey, messageId);
+  }
+
+  // Default: OpenAI
   if (!workspace?.openaiKey || !workspace.openaiKeyIv || !workspace.openaiKeyTag) {
-    // Try global key
     const globalKey = process.env.OPENAI_API_KEY;
     if (!globalKey) return null;
-    return classifyWithKey(globalKey, messageId);
+    return classifyWithOpenAI(globalKey, messageId);
   }
 
   const apiKey = decrypt(workspace.openaiKey, workspace.openaiKeyIv, workspace.openaiKeyTag);
-  return classifyWithKey(apiKey, messageId);
+  return classifyWithOpenAI(apiKey, messageId);
 }
 
-async function classifyWithKey(
-  apiKey: string,
-  messageId: string
-): Promise<ClassificationResult | null> {
+async function fetchMessageContext(messageId: string) {
   const message = await prisma.message.findUnique({
     where: { id: messageId },
     include: {
@@ -51,7 +77,6 @@ async function classifyWithKey(
   const content = message.bodyText || message.messageText || message.subject || "";
   if (!content.trim()) return null;
 
-  // Build context from recent messages
   const context = message.thread.messages
     .reverse()
     .map((m) => {
@@ -61,6 +86,22 @@ async function classifyWithKey(
     })
     .join("\n\n");
 
+  return context;
+}
+
+function validateResult(result: ClassificationResult): ClassificationResult | null {
+  if (!VALID_LABELS.includes(result.label as (typeof VALID_LABELS)[number])) return null;
+  if (result.confidence < 0 || result.confidence > 1) return null;
+  return result;
+}
+
+async function classifyWithOpenAI(
+  apiKey: string,
+  messageId: string
+): Promise<ClassificationResult | null> {
+  const context = await fetchMessageContext(messageId);
+  if (!context) return null;
+
   const openai = new OpenAI({ apiKey });
 
   try {
@@ -68,10 +109,7 @@ async function classifyWithKey(
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: CLASSIFICATION_PROMPT },
-        {
-          role: "user",
-          content: `Classify this prospect's latest reply:\n\n${context}`,
-        },
+        { role: "user", content: `Classify this prospect's latest reply:\n\n${context}` },
       ],
       temperature: 0.1,
       max_tokens: 100,
@@ -81,27 +119,40 @@ async function classifyWithKey(
     const raw = response.choices[0]?.message?.content;
     if (!raw) return null;
 
-    const result = JSON.parse(raw) as ClassificationResult;
-
-    // Validate
-    const validLabels = [
-      "INTERESTED",
-      "NOT_INTERESTED",
-      "MEETING_BOOKED",
-      "QUALIFYING",
-      "WRONG_PERSON",
-      "OUT_OF_OFFICE",
-      "MAYBE_FUTURE",
-      "AUTO_REPLY",
-      "NEUTRAL",
-    ];
-
-    if (!validLabels.includes(result.label)) return null;
-    if (result.confidence < 0 || result.confidence > 1) return null;
-
-    return result;
+    return validateResult(JSON.parse(raw) as ClassificationResult);
   } catch (error) {
     console.error("OpenAI classification error:", error);
+    return null;
+  }
+}
+
+async function classifyWithClaude(
+  apiKey: string,
+  messageId: string
+): Promise<ClassificationResult | null> {
+  const context = await fetchMessageContext(messageId);
+  if (!context) return null;
+
+  const client = new Anthropic({ apiKey });
+
+  try {
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 100,
+      system: CLASSIFICATION_PROMPT,
+      messages: [
+        { role: "user", content: `Classify this prospect's latest reply:\n\n${context}` },
+      ],
+    });
+
+    const raw = response.content[0]?.type === "text" ? response.content[0].text : null;
+    if (!raw) return null;
+
+    // Claude may wrap JSON in markdown fences — strip them
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+    return validateResult(JSON.parse(cleaned) as ClassificationResult);
+  } catch (error) {
+    console.error("Claude classification error:", error);
     return null;
   }
 }

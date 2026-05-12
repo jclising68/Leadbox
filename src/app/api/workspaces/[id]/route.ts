@@ -29,6 +29,7 @@ export async function PATCH(
     aiReplyMode?: "HUMAN_IN_LOOP" | "AUTO_REPLY";
     aiReplyProvider?: "openai" | "claude";
     aiReplyInstructions?: string | null;
+    aiLabelProvider?: "openai" | "claude";
   };
 
   const data: {
@@ -39,6 +40,7 @@ export async function PATCH(
     aiReplyMode?: "HUMAN_IN_LOOP" | "AUTO_REPLY";
     aiReplyProvider?: string | null;
     aiReplyInstructions?: string | null;
+    aiLabelProvider?: string | null;
   } = {};
 
   if (body.name !== undefined) {
@@ -70,6 +72,10 @@ export async function PATCH(
 
   if (body.aiReplyInstructions !== undefined) {
     data.aiReplyInstructions = body.aiReplyInstructions || null;
+  }
+
+  if (body.aiLabelProvider === "openai" || body.aiLabelProvider === "claude") {
+    data.aiLabelProvider = body.aiLabelProvider;
   }
 
   if (Object.keys(data).length === 0) {

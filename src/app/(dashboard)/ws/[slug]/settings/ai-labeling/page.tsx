@@ -1,15 +1,37 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useCurrentWorkspace, useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
-import { Loader2, Save, Key, Brain, Sparkles, Check } from "lucide-react";
+import {
+  Loader2,
+  Save,
+  Key,
+  Brain,
+  Sparkles,
+  CheckCircle2,
+  Pencil,
+  Trash2,
+} from "lucide-react";
+
+type Workspace = {
+  aiLabelProvider?: string | null;
+  openaiKey?: string | null;
+  claudeKey?: string | null;
+};
 
 const LABEL_CATEGORIES = [
   { name: "Interested", color: "#22C55E", description: "Prospect shows interest, asks for more info" },
@@ -25,26 +47,104 @@ const LABEL_CATEGORIES = [
 
 export default function AILabelingPage() {
   const workspaceId = useCurrentWorkspaceId();
-  const [openaiKey, setOpenaiKey] = useState("");
+  const workspace = useCurrentWorkspace() as Workspace | null;
+  const queryClient = useQueryClient();
 
-  const saveKey = useMutation({
+  const [openaiKeyInput, setOpenaiKeyInput] = useState("");
+  const [claudeKeyInput, setClaudeKeyInput] = useState("");
+  const [editingOpenai, setEditingOpenai] = useState(false);
+  const [editingClaude, setEditingClaude] = useState(false);
+
+  const headers = { "x-workspace-id": workspaceId!, "Content-Type": "application/json" };
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+
+  const aiLabelProvider = workspace?.aiLabelProvider ?? "openai";
+  const openaiConnected = Boolean(workspace?.openaiKey);
+  const claudeConnected = Boolean(workspace?.claudeKey);
+
+  const patchWorkspace = useMutation({
+    mutationFn: async (patch: Record<string, unknown>) => {
+      const res = await fetch(`/api/workspaces/${workspaceId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to update");
+      }
+      return res.json();
+    },
+    onSuccess: invalidate,
+    onError: (err) => toast.error(err.message),
+  });
+
+  const saveOpenaiKey = useMutation({
     mutationFn: async () => {
       const res = await fetch(`/api/workspaces/${workspaceId}/openai`, {
         method: "POST",
-        headers: {
-          "x-workspace-id": workspaceId!,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ apiKey: openaiKey }),
+        headers,
+        body: JSON.stringify({ apiKey: openaiKeyInput }),
       });
       if (!res.ok) throw new Error("Failed to save");
-      return res.json();
     },
     onSuccess: () => {
-      toast.success("OpenAI API key saved and encrypted");
-      setOpenaiKey("");
+      toast.success("OpenAI API key saved");
+      setOpenaiKeyInput("");
+      setEditingOpenai(false);
+      invalidate();
     },
-    onError: () => toast.error("Failed to save key"),
+    onError: () => toast.error("Failed to save OpenAI key"),
+  });
+
+  const deleteOpenaiKey = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/workspaces/${workspaceId}/openai`, {
+        method: "DELETE",
+        headers,
+      });
+      if (!res.ok) throw new Error("Failed to remove");
+    },
+    onSuccess: () => {
+      toast.success("OpenAI API key removed");
+      setEditingOpenai(false);
+      invalidate();
+    },
+    onError: () => toast.error("Failed to remove key"),
+  });
+
+  const saveClaudeKey = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/workspaces/${workspaceId}/claude`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ apiKey: claudeKeyInput }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+    },
+    onSuccess: () => {
+      toast.success("Claude API key saved");
+      setClaudeKeyInput("");
+      setEditingClaude(false);
+      invalidate();
+    },
+    onError: () => toast.error("Failed to save Claude key"),
+  });
+
+  const deleteClaudeKey = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/workspaces/${workspaceId}/claude`, {
+        method: "DELETE",
+        headers,
+      });
+      if (!res.ok) throw new Error("Failed to remove");
+    },
+    onSuccess: () => {
+      toast.success("Claude API key removed");
+      setEditingClaude(false);
+      invalidate();
+    },
+    onError: () => toast.error("Failed to remove key"),
   });
 
   return (
@@ -56,46 +156,184 @@ export default function AILabelingPage() {
         </p>
       </div>
 
-      {/* API Key */}
+      {/* Provider + API Key */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <Key className="h-4 w-4" />
-            OpenAI API Key
+            AI Provider
           </CardTitle>
           <CardDescription>
-            Required for automatic message classification. We use gpt-4o-mini for
-            fast, cost-effective labeling (~$2/month per 1,000 messages).
+            Choose which AI model to use for classifying replies. Keys are shared with AI Reply if already connected.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label>API Key</Label>
-            <div className="flex gap-2">
-              <Input
-                type="password"
-                value={openaiKey}
-                onChange={(e) => setOpenaiKey(e.target.value)}
-                placeholder="sk-..."
-                className="font-mono"
-              />
-              <Button
-                onClick={() => saveKey.mutate()}
-                disabled={!openaiKey || saveKey.isPending}
-                className="gap-1 shrink-0"
-              >
-                {saveKey.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Save className="h-3.5 w-3.5" />
-                )}
-                Save
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Your key is encrypted at rest using AES-256-GCM. It is never exposed to the frontend.
-            </p>
+            <Label>Model</Label>
+            <Select
+              value={aiLabelProvider}
+              onValueChange={(v) => patchWorkspace.mutate({ aiLabelProvider: v })}
+              disabled={patchWorkspace.isPending}
+            >
+              <SelectTrigger className="w-64">
+                <SelectValue>
+                  {aiLabelProvider === "claude" ? "Claude Sonnet 4.6 (Anthropic)" : "GPT-4o Mini (OpenAI)"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="openai">GPT-4o Mini (OpenAI)</SelectItem>
+                <SelectItem value="claude">Claude Sonnet 4.6 (Anthropic)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+
+          {/* OpenAI key */}
+          {aiLabelProvider === "openai" && (
+            <div className="space-y-2">
+              <Label>OpenAI API Key</Label>
+              {openaiConnected && !editingOpenai ? (
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400 font-medium">
+                    <CheckCircle2 className="h-4 w-4" />
+                    Connected
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 h-7 text-xs"
+                    onClick={() => setEditingOpenai(true)}
+                  >
+                    <Pencil className="h-3 w-3" />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 h-7 text-xs text-destructive hover:text-destructive"
+                    onClick={() => deleteOpenaiKey.mutate()}
+                    disabled={deleteOpenaiKey.isPending}
+                  >
+                    {deleteOpenaiKey.isPending ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3 w-3" />
+                    )}
+                    Remove
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <Input
+                      type="password"
+                      value={openaiKeyInput}
+                      onChange={(e) => setOpenaiKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="font-mono"
+                      autoFocus={editingOpenai}
+                    />
+                    <Button
+                      onClick={() => saveOpenaiKey.mutate()}
+                      disabled={!openaiKeyInput || saveOpenaiKey.isPending}
+                      className="gap-1 shrink-0"
+                    >
+                      {saveOpenaiKey.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Save className="h-3.5 w-3.5" />
+                      )}
+                      Save
+                    </Button>
+                    {editingOpenai && (
+                      <Button
+                        variant="ghost"
+                        onClick={() => { setEditingOpenai(false); setOpenaiKeyInput(""); }}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Encrypted at rest using AES-256-GCM. Never exposed to the frontend. Shared with AI Reply.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Claude key */}
+          {aiLabelProvider === "claude" && (
+            <div className="space-y-2">
+              <Label>Claude API Key</Label>
+              {claudeConnected && !editingClaude ? (
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400 font-medium">
+                    <CheckCircle2 className="h-4 w-4" />
+                    Connected
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 h-7 text-xs"
+                    onClick={() => setEditingClaude(true)}
+                  >
+                    <Pencil className="h-3 w-3" />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 h-7 text-xs text-destructive hover:text-destructive"
+                    onClick={() => deleteClaudeKey.mutate()}
+                    disabled={deleteClaudeKey.isPending}
+                  >
+                    {deleteClaudeKey.isPending ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3 w-3" />
+                    )}
+                    Remove
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <Input
+                      type="password"
+                      value={claudeKeyInput}
+                      onChange={(e) => setClaudeKeyInput(e.target.value)}
+                      placeholder="sk-ant-..."
+                      className="font-mono"
+                      autoFocus={editingClaude}
+                    />
+                    <Button
+                      onClick={() => saveClaudeKey.mutate()}
+                      disabled={!claudeKeyInput || saveClaudeKey.isPending}
+                      className="gap-1 shrink-0"
+                    >
+                      {saveClaudeKey.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Save className="h-3.5 w-3.5" />
+                      )}
+                      Save
+                    </Button>
+                    {editingClaude && (
+                      <Button
+                        variant="ghost"
+                        onClick={() => { setEditingClaude(false); setClaudeKeyInput(""); }}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Encrypted at rest using AES-256-GCM. Never exposed to the frontend. Shared with AI Reply.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -109,30 +347,18 @@ export default function AILabelingPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 text-sm">
-            <div className="flex items-start gap-3">
-              <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                <span className="text-xs font-medium text-primary">1</span>
+            {[
+              "When a new reply comes in via webhook (Instantly, HeyReach, or Lemlist), it's stored for classification.",
+              `The message + thread context is sent to ${aiLabelProvider === "claude" ? "Claude Sonnet 4.6 (Anthropic)" : "GPT-4o Mini (OpenAI)"} for classification.`,
+              "If confidence is ≥ 70%, the label is automatically applied. Low-confidence results are skipped.",
+            ].map((step, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                  <span className="text-xs font-medium text-primary">{i + 1}</span>
+                </div>
+                <p className="text-muted-foreground">{step}</p>
               </div>
-              <p className="text-muted-foreground">
-                When a new reply comes in via webhook (Instantly or HeyReach), it&apos;s stored and queued for classification.
-              </p>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                <span className="text-xs font-medium text-primary">2</span>
-              </div>
-              <p className="text-muted-foreground">
-                The message + thread context is sent to OpenAI (gpt-4o-mini) for classification.
-              </p>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                <span className="text-xs font-medium text-primary">3</span>
-              </div>
-              <p className="text-muted-foreground">
-                If confidence is &ge; 70%, the label is automatically applied. Low-confidence results are skipped.
-              </p>
-            </div>
+            ))}
           </div>
         </CardContent>
       </Card>
