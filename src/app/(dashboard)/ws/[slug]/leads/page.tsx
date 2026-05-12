@@ -37,7 +37,6 @@ import {
   ChevronDown,
   ChevronUp,
   Mail,
-  Link2,
   Loader2,
   ArrowUpDown,
   Filter,
@@ -454,7 +453,7 @@ const PROVIDER_LOGOS: Record<string, { src: string; label: string }> = {
 };
 
 function ProviderIcon({ provider, channel }: { provider: string | null; channel?: string | null }) {
-  const resolved = provider || (channel === "LINKEDIN" ? "HEYREACH" : channel === "EMAIL" ? "INSTANTLY" : null);
+  const resolved = provider || (channel === "LINKEDIN" ? "HEYREACH" : null);
   const meta = resolved ? PROVIDER_LOGOS[resolved] : null;
   if (!meta) return <span className="text-muted-foreground/60 text-[10px]">-</span>;
   return (
@@ -471,7 +470,6 @@ export default function LeadsPage() {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortConfig>({ field: "lastMessageAt", dir: "desc" });
   const [labelFilter, setLabelFilter] = useState("");
-  const [channelFilter, setChannelFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -595,7 +593,6 @@ export default function LeadsPage() {
     sortBy: sort.field,
     sortDir: sort.dir,
     label: labelFilter,
-    channel: channelFilter,
     provider: providerFilter,
     dateFrom: dateFrom || undefined,
     dateTo: dateTo || undefined,
@@ -702,8 +699,8 @@ export default function LeadsPage() {
     }
   }, [workspaceId]);
 
-  const hasFilters = !!labelFilter || !!channelFilter || !!dateFrom || !!dateTo || !!statusFilter || !!providerFilter;
-  const activeFilterCount = [!!channelFilter, !!labelFilter, !!statusFilter, !!(dateFrom || dateTo), !!providerFilter, showUnsubscribed].filter(Boolean).length;
+  const hasFilters = !!labelFilter || !!dateFrom || !!dateTo || !!statusFilter || !!providerFilter;
+  const activeFilterCount = [!!labelFilter, !!statusFilter, !!(dateFrom || dateTo), !!providerFilter, showUnsubscribed].filter(Boolean).length;
 
   const filterTriggerBase =
     "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border transition-colors focus:outline-none focus:ring-2 focus:ring-ring/40";
@@ -766,7 +763,7 @@ export default function LeadsPage() {
               <div className="p-3 border-b border-border flex items-center justify-between">
                 <span className="text-sm font-medium">Filters</span>
                 <button
-                  onClick={() => { setLabelFilter(""); setChannelFilter(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); setProviderFilter(""); setShowUnsubscribed(false); }}
+                  onClick={() => { setLabelFilter(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); setProviderFilter(""); setShowUnsubscribed(false); }}
                   className={cn(
                     "text-xs transition-colors",
                     hasFilters || showUnsubscribed
@@ -776,29 +773,6 @@ export default function LeadsPage() {
                 >
                   Clear all
                 </button>
-              </div>
-
-              {/* Channel */}
-              <div className="p-3 border-b border-border">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Channel</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {[{ label: "All", value: "" }, { label: "Email", value: "EMAIL" }, { label: "LinkedIn", value: "LINKEDIN" }].map((opt) => (
-                    <button
-                      key={opt.value}
-                      onClick={() => setChannelFilter(opt.value)}
-                      className={cn(
-                        "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs border transition-colors",
-                        channelFilter === opt.value
-                          ? "bg-primary/10 border-primary/30 text-foreground font-medium"
-                          : "bg-card border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                      )}
-                    >
-                      {opt.value === "EMAIL" && <Mail className="h-3 w-3" />}
-                      {opt.value === "LINKEDIN" && <Link2 className="h-3 w-3" />}
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
               </div>
 
               {/* Label */}
@@ -986,7 +960,7 @@ export default function LeadsPage() {
 
           {(hasFilters || showUnsubscribed) && (
             <button
-              onClick={() => { setLabelFilter(""); setChannelFilter(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); setProviderFilter(""); setShowUnsubscribed(false); }}
+              onClick={() => { setLabelFilter(""); setDateFrom(""); setDateTo(""); setStatusFilter(""); setProviderFilter(""); setShowUnsubscribed(false); }}
               className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
             >
               <X className="h-3 w-3" /> Clear

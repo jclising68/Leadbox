@@ -4,7 +4,7 @@ import { useThreads } from "@/hooks/use-threads";
 import { useInboxStore } from "@/stores/inbox-store";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { cn } from "@/lib/utils";
-import { Mail, Link2, Loader2, Filter, X, SlidersHorizontal, RefreshCw, Search, ArrowDownNarrowWide, ArrowUpNarrowWide } from "lucide-react";
+import { Mail, Loader2, Filter, X, SlidersHorizontal, RefreshCw, Search, ArrowDownNarrowWide, ArrowUpNarrowWide } from "lucide-react";
 import Image from "next/image";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQueryClient } from "@tanstack/react-query";
@@ -40,7 +40,7 @@ const PROVIDER_LOGOS: Record<string, { src: string; label: string }> = {
 
 function ThreadProviderIcon({ thread }: { thread: { channel?: string; messages?: Array<{ integration?: { provider?: string } }> } }) {
   const provider = thread.messages?.[0]?.integration?.provider;
-  const resolved = provider || (thread.channel === "LINKEDIN" ? "HEYREACH" : thread.channel === "EMAIL" ? "INSTANTLY" : null);
+  const resolved = provider || (thread.channel === "LINKEDIN" ? "HEYREACH" : null);
   const meta = resolved ? PROVIDER_LOGOS[resolved] : null;
   if (!meta) return null;
   return (
@@ -54,7 +54,6 @@ export function ThreadList() {
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage, refetch } = useThreads();
   const {
     selectedThreadId, setSelectedThread, view,
-    filterChannel, setFilterChannel,
     filterProvider, setFilterProvider,
     filterUnread, setFilterUnread,
     filterHasReply, setFilterHasReply,
@@ -153,7 +152,7 @@ export function ThreadList() {
     }
   }, [selectedThreadId, threads, rowVirtualizer]);
 
-  const hasActiveFilters = !!filterChannel || !!filterProvider || filterUnread || filterHasReply || !!filterDateFrom || !!filterDateTo;
+  const hasActiveFilters = !!filterProvider || filterUnread || filterHasReply || !!filterDateFrom || !!filterDateTo;
 
   const viewTitle = view === "ARCHIVED" ? "Archive" : view === "SPAM" ? "Spam" : view === "TRASH" ? "Trash" : "All messages";
 
@@ -227,31 +226,6 @@ export function ThreadList() {
         {/* Filter bar */}
         {showFilters && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {/* Channel filter */}
-            <button
-              onClick={() => setFilterChannel(filterChannel === "EMAIL" ? null : "EMAIL")}
-              className={cn(
-                "px-2 py-0.5 rounded text-[11px] border transition-colors",
-                filterChannel === "EMAIL"
-                  ? "bg-primary/10 border-primary/30 text-primary"
-                  : "border-border text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Mail className="h-3 w-3 inline mr-1" />
-              Email
-            </button>
-            <button
-              onClick={() => setFilterChannel(filterChannel === "LINKEDIN" ? null : "LINKEDIN")}
-              className={cn(
-                "px-2 py-0.5 rounded text-[11px] border transition-colors",
-                filterChannel === "LINKEDIN"
-                  ? "bg-primary/10 border-primary/30 text-primary"
-                  : "border-border text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Link2 className="h-3 w-3 inline mr-1" />
-              LinkedIn
-            </button>
             {/* Source (provider) filters */}
             {[
               { value: "INSTANTLY", src: "/branding/instantly.png", label: "Instantly" },
@@ -364,7 +338,7 @@ export function ThreadList() {
           <div className="mt-1.5 flex items-center gap-1">
             <Filter className="h-3 w-3 text-muted-foreground" />
             <span className="text-[11px] text-muted-foreground">
-              Filters ({[filterChannel, filterProvider, filterUnread && "unread", filterHasReply && "reply", (filterDateFrom || filterDateTo) && "date"].filter(Boolean).length})
+              Filters ({[filterProvider, filterUnread && "unread", filterHasReply && "reply", (filterDateFrom || filterDateTo) && "date"].filter(Boolean).length})
             </span>
             <button onClick={clearFilters} className="text-muted-foreground hover:text-foreground">
               <X className="h-3 w-3" />

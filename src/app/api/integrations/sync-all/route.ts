@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { syncInstantly } from "@/services/instantly-sync";
 import { syncHeyreach } from "@/services/heyreach-sync";
+import { syncLemlist } from "@/services/lemlist-sync";
 import { enrichFromInstantly } from "@/services/lead-enrichment";
 import { markSyncStartedFresh, STALE_LOCK_MS, updateSyncProgress } from "@/services/sync-progress";
 
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
   // pull threads/messages, so sweeping them through sync-all routes their
   // API key into the wrong provider and 401s.
   const integrations = await prisma.integration.findMany({
-    where: { workspaceId: workspaceId!, provider: { in: ["INSTANTLY", "HEYREACH"] } },
+    where: { workspaceId: workspaceId!, provider: { in: ["INSTANTLY", "HEYREACH", "LEMLIST"] } },
     select: { id: true, provider: true, lastSyncAt: true, isActive: true, config: true },
   });
 
@@ -120,14 +121,11 @@ export async function POST(req: NextRequest) {
 
     after(async () => {
       const syncFn =
-        integration.provider === "INSTANTLY"
-          ? syncInstantly
-          : integration.provider === "HEYREACH"
-          ? syncHeyreach
-          : null;
+        integration.provider === "INSTANTLY" ? syncInstantly :
+        integration.provider === "HEYREACH"  ? syncHeyreach :
+        integration.provider === "LEMLIST"   ? syncLemlist :
+        null;
       if (!syncFn) {
-        // Should never happen given the where-clause above; guard anyway so a
-        // future provider added to the enum doesn't get routed to syncHeyreach.
         console.error(`[sync-all] No sync handler for provider ${integration.provider}`);
         return;
       }

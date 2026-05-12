@@ -210,10 +210,20 @@ async function fetchCampaigns(apiKey: string): Promise<Map<string, string>> {
   const map = new Map<string, string>();
 
   try {
-    // Single request — most accounts have < 100 campaigns
-    const data = await rateLimitedFetch(apiKey, "/campaigns", { limit: "100" });
-    const items = (data.items || []) as { id: string; name: string }[];
-    for (const c of items) map.set(c.id, c.name);
+    let cursor: string | undefined;
+    let page = 0;
+    while (true) {
+      const params: Record<string, string> = { limit: "100" };
+      if (cursor) params.starting_after = cursor;
+      const data = await rateLimitedFetch(apiKey, "/campaigns", params);
+      const items = (data.items || []) as { id: string; name: string }[];
+      for (const c of items) map.set(c.id, c.name);
+      page++;
+      const next = data.next_starting_after as string | undefined;
+      if (!next || items.length === 0) break;
+      cursor = next;
+    }
+    console.log(`[sync] Loaded ${map.size} campaigns across ${page} page(s)`);
   } catch {
     console.log("[sync] Could not fetch campaigns, continuing without names");
   }
@@ -330,6 +340,54 @@ async function syncLeadStatuses(
   }
 }
 
+/**
+ * For prospects whose campaignName is null but have messages with a known
+ * campaign_id, fill in the name from campaignMap. Runs as a post-sync pass
+ * so existing data is fixed without re-syncing every email.
+ */
+async function backfillCampaignNames(
+  workspaceId: string,
+  campaignMap: Map<string, string>,
+): Promise<void> {
+  if (!campaignMap.size) return;
+
+  // One SQL join to find all (prospectId, campaignId) pairs where campaignName is null.
+  const rows = await prisma.$queryRaw<Array<{ prospectId: string; campaignId: string }>>`
+    SELECT DISTINCT t."prospectId", m."campaignId"
+    FROM "Message" m
+    JOIN "Thread" t ON t.id = m."threadId"
+    JOIN "Prospect" p ON p.id = t."prospectId"
+    WHERE m."workspaceId" = ${workspaceId}
+      AND m."campaignId" IS NOT NULL
+      AND p."campaignName" IS NULL
+      AND p."workspaceId" = ${workspaceId}
+  `;
+
+  if (!rows.length) return;
+
+  // Group prospect IDs by resolved campaign name, then batch-update.
+  const byName = new Map<string, string[]>();
+  for (const r of rows) {
+    const name = campaignMap.get(r.campaignId);
+    if (!name) continue;
+    const ids = byName.get(name) ?? [];
+    ids.push(r.prospectId);
+    byName.set(name, ids);
+  }
+
+  let total = 0;
+  for (const [campaignName, ids] of byName) {
+    await prisma.prospect.updateMany({
+      where: { id: { in: ids } },
+      data: { campaignName },
+    });
+    total += ids.length;
+  }
+  if (total > 0) {
+    console.log(`[sync] Backfilled campaignName for ${total} prospect(s) across ${byName.size} campaign(s)`);
+  }
+}
+
 export async function syncInstantly(
   integrationId: string,
   /** Total milliseconds this sync is allowed to run. Defaults to 250s
@@ -393,17 +451,22 @@ export async function syncInstantly(
   const cutoffDate = new Date(cutoffIso);
   console.log(`[sync] Backfill cutoff: ${cutoffDate.toISOString()}`);
 
+  // Delta mode (backfillComplete) always starts from the newest emails so
+  // inbound replies that arrived since the last run are seen on page 1.
+  // The stored backfill cursor only applies during the initial history walk.
+  const fetchCursor = backfillComplete ? undefined : resumeCursor;
+
   const { emails, outcome, nextCursor, oldestReached } = await fetchEmailsIncremental(
     integrationId,
     apiKey,
     existingIds as Set<string>,
     timeBudgetMs,
     startTime,
-    resumeCursor,
+    fetchCursor,
     backfillComplete,
     cutoffDate,
   );
-  console.log(`[sync] Fetched ${emails.length} emails from Instantly (outcome: ${outcome}${resumeCursor ? ", resumed" : ""}${oldestReached ? `, oldest ${oldestReached.toISOString()}` : ""})`);
+  console.log(`[sync] Fetched ${emails.length} emails from Instantly (outcome: ${outcome}${fetchCursor ? ", resumed backfill" : backfillComplete ? ", delta from top" : ""}${oldestReached ? `, oldest ${oldestReached.toISOString()}` : ""})`);
 
   // Sort newest-first so recent data appears immediately.
   emails.sort((a, b) => {
@@ -483,6 +546,10 @@ export async function syncInstantly(
   // Sync lt_interest_status from Instantly back to LeadBox for replied leads.
   await syncLeadStatuses(workspaceId, apiKey, repliedLeadIds);
 
+  // Fill campaignName on prospects that were synced before the full campaign
+  // list was loaded (i.e. campaign was beyond the old 100-campaign limit).
+  await backfillCampaignNames(workspaceId, campaignMap);
+
   // Re-read config — progress beats may have mutated it during this run.
   const freshRow = await prisma.integration.findUnique({
     where: { id: integrationId },
@@ -493,6 +560,11 @@ export async function syncInstantly(
     freshConfig.instantlyBackfillCursor = nextCursor;
   } else if (outcome === "reached_end") {
     freshConfig.instantlyBackfillComplete = true;
+    delete freshConfig.instantlyBackfillCursor;
+  } else if (backfillComplete) {
+    // Delta mode finished (early_terminated or reached_end without cursor).
+    // Always clear the old backfill cursor so the next delta run starts fresh
+    // from the newest emails rather than resuming mid-history.
     delete freshConfig.instantlyBackfillCursor;
   }
   if (oldestReached) {
