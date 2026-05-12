@@ -110,6 +110,13 @@ async function fetchEmailsIncremental(
    *  history and explicitly opt into older data via an "Expand" action.
    *  Undefined means walk to the beginning of the account. */
   cutoffDate: Date | undefined,
+  /** Precise stop marker from the previous delta run — the Instantly ID of
+   *  the newest email collected last time. When found in the current page,
+   *  everything from that point onward is already processed, so we stop.
+   *  More reliable than pctNew heuristic because it is exact: outbound-heavy
+   *  pages can't cause false early termination, and inbound replies mixed into
+   *  those pages are never skipped. */
+  stopAtId?: string,
 ): Promise<{ emails: InstantlyEmail[]; outcome: FetchOutcome; nextCursor?: string; oldestReached?: Date }> {
   const allEmails: InstantlyEmail[] = [];
   let cursor: string | undefined = resumeCursor;
@@ -169,8 +176,15 @@ async function fetchEmailsIncremental(
     // Cutoff filter: walking DESC means the newest items are first, oldest
     // last. Keep everything above the cutoff, stop once this page's oldest
     // item falls below it (marking backfill complete for this cutoff).
+    // Stop-at-ID: when the precise delta marker from the previous run is
+    // found, everything from that point onward is already processed.
     let cutoffReached = false;
+    let stopReached = false;
     for (const e of items) {
+      if (stopAtId && e.id === stopAtId) {
+        stopReached = true;
+        break;
+      }
       const ts = e.timestamp_created ? new Date(e.timestamp_created) : null;
       if (cutoffDate && ts && ts < cutoffDate) {
         cutoffReached = true;
@@ -181,18 +195,33 @@ async function fetchEmailsIncremental(
     }
 
     const newInPage = items.filter((e) => !existingIds.has(e.id)).length;
+    const newInboundInPage = items.filter((e) => !existingIds.has(e.id) && e.ue_type === 2).length;
     const pctNew = items.length ? newInPage / items.length : 0;
-    console.log(`[sync] Page ${page}: ${items.length} emails, ${newInPage} new (${Math.round(pctNew * 100)}%) — total fetched: ${allEmails.length}${cutoffReached ? " (cutoff reached)" : ""}`);
+    console.log(
+      `[sync] Page ${page}: ${items.length} emails, ${newInPage} new (${Math.round(pctNew * 100)}%)` +
+      (newInboundInPage ? `, ${newInboundInPage} new inbound` : "") +
+      ` — total fetched: ${allEmails.length}` +
+      (cutoffReached ? " (cutoff reached)" : "") +
+      (stopReached ? " (delta marker reached)" : ""),
+    );
+
+    if (stopReached) {
+      outcome = "early_terminated";
+      break;
+    }
 
     if (cutoffReached) {
       outcome = "reached_end";
       break;
     }
 
-    // Early termination only safe after a full historical backfill — before
-    // that, a mostly-old page on page 2 can skip an unfilled historical gap.
-    if (allowEarlyTermination && pctNew < 0.2 && page > 1) {
-      console.log(`[sync] Early termination: page ${page} is mostly old data`);
+    // Safety-net early termination — primary stop is stopAtId above.
+    // This fallback fires only when the previous run's marker email was
+    // deleted from Instantly (rare), ensuring the sync doesn't walk the
+    // entire history again. Guard: no new inbound replies on this page,
+    // so we're confident we haven't missed anything actionable.
+    if (allowEarlyTermination && pctNew < 0.2 && page > 1 && newInboundInPage === 0) {
+      console.log(`[sync] Early termination: page ${page} mostly old, no new inbound`);
       outcome = "early_terminated";
       break;
     }
@@ -465,6 +494,8 @@ export async function syncInstantly(
     fetchCursor,
     backfillComplete,
     cutoffDate,
+    // Delta mode only: precise stop marker from the previous run.
+    backfillComplete ? (config.deltaStopAfter as string | undefined) : undefined,
   );
   console.log(`[sync] Fetched ${emails.length} emails from Instantly (outcome: ${outcome}${fetchCursor ? ", resumed backfill" : backfillComplete ? ", delta from top" : ""}${oldestReached ? `, oldest ${oldestReached.toISOString()}` : ""})`);
 
@@ -513,17 +544,21 @@ export async function syncInstantly(
       // Back-write reply data to the Prospect profile card (mirrors HeyReach enrichment).
       // Only fills null fields — never overwrites manually-entered data.
       if (email.ue_type === 2 && payload.prospectEmail) {
-        const updateData: Record<string, string | null> = { stepReplied: "Step 1" };
-        if (payload.bodyText) updateData.notes = payload.bodyText.slice(0, 500);
-        if (payload.campaignName) updateData.campaignName = payload.campaignName;
+        // stepReplied + campaignName: set only on first reply (stepReplied is null)
+        const firstReplyData: Record<string, string | null> = { stepReplied: "Step 1" };
+        if (payload.campaignName) firstReplyData.campaignName = payload.campaignName;
         await prisma.prospect.updateMany({
-          where: {
-            workspaceId,
-            email: payload.prospectEmail,
-            stepReplied: null,
-          },
-          data: updateData,
+          where: { workspaceId, email: payload.prospectEmail, stepReplied: null },
+          data: firstReplyData,
         });
+        // notes: fill whenever null — catches leads whose stepReplied was set before
+        // the notes feature existed and would otherwise never get notes written.
+        if (payload.bodyText) {
+          await prisma.prospect.updateMany({
+            where: { workspaceId, email: payload.prospectEmail, notes: null },
+            data: { notes: payload.bodyText.slice(0, 500) },
+          });
+        }
       }
     } catch (err) {
       errors++;
@@ -566,6 +601,14 @@ export async function syncInstantly(
     // Always clear the old backfill cursor so the next delta run starts fresh
     // from the newest emails rather than resuming mid-history.
     delete freshConfig.instantlyBackfillCursor;
+  }
+  // In delta mode, save the newest fetched email ID as the precise stop marker
+  // for the next run. This replaces the pctNew heuristic — we stop exactly
+  // when we see this email, so outbound-heavy pages can never cause false
+  // early termination and miss inbound replies.
+  if (backfillComplete && emails.length > 0) {
+    // emails are sorted newest-first after the sort step above; [0] is newest.
+    freshConfig.deltaStopAfter = emails[0].id;
   }
   if (oldestReached) {
     const prev = freshConfig.instantlyOldestReached as string | undefined;
