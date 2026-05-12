@@ -447,6 +447,21 @@ export async function syncInstantly(
       if (email.ue_type === 2 && email.lead) {
         repliedLeadIds.add(email.lead);
       }
+      // Back-write reply data to the Prospect profile card (mirrors HeyReach enrichment).
+      // Only fills null fields — never overwrites manually-entered data.
+      if (email.ue_type === 2 && payload.prospectEmail) {
+        const updateData: Record<string, string | null> = { stepReplied: "Step 1" };
+        if (payload.bodyText) updateData.notes = payload.bodyText.slice(0, 500);
+        if (payload.campaignName) updateData.campaignName = payload.campaignName;
+        await prisma.prospect.updateMany({
+          where: {
+            workspaceId,
+            email: payload.prospectEmail,
+            stepReplied: null,
+          },
+          data: updateData,
+        });
+      }
     } catch (err) {
       errors++;
       if (errors <= 5) {
