@@ -19,6 +19,7 @@ type InboxStore = {
   filterDateFrom: string | null;
   filterDateTo: string | null;
   sortDir: "desc" | "asc";
+  isOutbound: boolean;
   setView: (view: InboxView) => void;
   setSelectedThread: (id: string | null) => void;
   setSelectedLabel: (id: string | null) => void;
@@ -32,6 +33,7 @@ type InboxStore = {
   setFilterDateFrom: (d: string | null) => void;
   setFilterDateTo: (d: string | null) => void;
   setSortDir: (d: "desc" | "asc") => void;
+  setIsOutbound: (v: boolean) => void;
   clearFilters: () => void;
 };
 
@@ -51,6 +53,7 @@ export const useInboxStore = create<InboxStore>()(
       filterDateFrom: null,
       filterDateTo: null,
       sortDir: "desc",
+      isOutbound: false,
       setView: (view) => set({ view, selectedLabelId: null }),
       setSelectedThread: (id) => set({ selectedThreadId: id }),
       setSelectedLabel: (id) => set({ selectedLabelId: id, view: "ALL" }),
@@ -64,6 +67,7 @@ export const useInboxStore = create<InboxStore>()(
       setFilterDateFrom: (d) => set({ filterDateFrom: d }),
       setFilterDateTo: (d) => set({ filterDateTo: d }),
       setSortDir: (d) => set({ sortDir: d }),
+      setIsOutbound: (v) => set({ isOutbound: v }),
       clearFilters: () => set({ filterChannel: null, filterProvider: null, filterCampaign: null, filterUnread: false, filterHasReply: false, filterDateFrom: null, filterDateTo: null, searchQuery: "" }),
     }),
     {

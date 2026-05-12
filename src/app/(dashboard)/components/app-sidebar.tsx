@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import {
   Inbox,
+  MailOpen,
   Briefcase,
   Archive,
   Trash2,
@@ -38,6 +39,7 @@ function useWsHref(path: string) {
 
 const mainNavItems = [
   { label: "Inbox", path: "/inbox", icon: Inbox, matchEnd: "/inbox" },
+  { label: "Outbound Inbox", path: "/outbound-inbox", icon: MailOpen, matchEnd: "/outbound-inbox" },
   { label: "Leads", path: "/leads", icon: Briefcase, matchEnd: "/leads" },
 ];
 

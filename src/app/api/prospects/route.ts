@@ -120,6 +120,8 @@ export async function GET(req: NextRequest) {
     workspaceId: workspaceId!,
     // showUnsubscribed=true → only unsubscribed; default → only subscribed
     isUnsubscribed: showUnsubscribed ? true : false,
+    // Leads section is campaign-only — non-campaign contacts live in Outbound Inbox
+    campaignName: { not: null },
   };
 
   // Isolated AND condition — never merged into where.thread so it can't be

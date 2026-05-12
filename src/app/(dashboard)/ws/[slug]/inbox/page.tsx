@@ -11,7 +11,10 @@ export default function InboxPage() {
   const searchParams = useSearchParams();
   const status = searchParams.get("status");
   const threadParam = searchParams.get("thread");
-  const { setView, setSelectedThread, clearFilters, selectedThreadId } = useInboxStore();
+  const { setView, setSelectedThread, clearFilters, setIsOutbound, selectedThreadId } = useInboxStore();
+
+  // Ensure this page always shows campaign contacts only
+  useEffect(() => { setIsOutbound(false); }, [setIsOutbound]);
 
   // When arriving from a notification or a cross-page link (`?thread=<id>`),
   // open that thread in the detail pane. Clear filters so the thread isn't

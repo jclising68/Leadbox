@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
   const dateTo = url.searchParams.get("dateTo");
   const hasReply = url.searchParams.get("hasReply");
   const provider = url.searchParams.get("provider");
+  const outbound = url.searchParams.get("outbound") === "true";
   const sortDir = url.searchParams.get("sortDir") === "asc" ? "asc" : "desc";
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 100);
 
@@ -82,6 +83,15 @@ export async function GET(req: NextRequest) {
   // status param), which would otherwise let TRASH threads slip through.
   if (status !== "TRASH") {
     andConditions.push({ status: { not: "TRASH" } });
+  }
+
+  // Route threads by campaign association. Main inbox shows only threads whose
+  // prospect has a campaignName (i.e. came from Instantly/HeyReach/Lemlist
+  // campaigns). Outbound inbox shows the rest (direct/organic contacts).
+  if (outbound) {
+    andConditions.push({ prospect: { campaignName: null } });
+  } else {
+    andConditions.push({ prospect: { campaignName: { not: null } } });
   }
 
   // Default inbox view ("All messages" tab, OPEN status, no label selected):
