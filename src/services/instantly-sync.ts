@@ -218,9 +218,13 @@ async function fetchEmailsIncremental(
     // Safety-net early termination — primary stop is stopAtId above.
     // This fallback fires only when the previous run's marker email was
     // deleted from Instantly (rare), ensuring the sync doesn't walk the
-    // entire history again. Guard: no new inbound replies on this page,
-    // so we're confident we haven't missed anything actionable.
-    if (allowEarlyTermination && pctNew < 0.2 && page > 1 && newInboundInPage === 0) {
+    // entire history again. Guards:
+    //   page > 5  — always scan the top 500 newest emails so outbound-heavy
+    //               pages near the top never prevent inbound replies from
+    //               being found on the next few pages.
+    //   newInboundInPage === 0 — never stop on a page that has new inbound
+    //               replies; those must be processed regardless of pctNew.
+    if (allowEarlyTermination && pctNew < 0.2 && page > 5 && newInboundInPage === 0) {
       console.log(`[sync] Early termination: page ${page} mostly old, no new inbound`);
       outcome = "early_terminated";
       break;
@@ -591,16 +595,26 @@ export async function syncInstantly(
     select: { config: true },
   });
   const freshConfig = ((freshRow?.config as Record<string, unknown>) ?? {});
-  if (outcome === "time_budget" && nextCursor) {
+  if (outcome === "time_budget" && nextCursor && !backfillComplete) {
+    // Only save the resume cursor during an active backfill walk. In delta
+    // mode the cursor is never used (we always start from newest), so saving
+    // it would leave stale state that could corrupt the next sync if
+    // backfillComplete is ever lost.
     freshConfig.instantlyBackfillCursor = nextCursor;
   } else if (outcome === "reached_end") {
     freshConfig.instantlyBackfillComplete = true;
     delete freshConfig.instantlyBackfillCursor;
-  } else if (backfillComplete) {
-    // Delta mode finished (early_terminated or reached_end without cursor).
-    // Always clear the old backfill cursor so the next delta run starts fresh
-    // from the newest emails rather than resuming mid-history.
+  } else {
+    // Delta mode (backfillComplete) or time_budget with no cursor:
+    // always clear any leftover cursor so the next run starts fresh from
+    // the newest emails.
     delete freshConfig.instantlyBackfillCursor;
+  }
+  // Defensive write: always re-assert backfillComplete so it can never be
+  // silently lost from the config. If it disappears, the next sync would
+  // fall back into backfill mode and walk backwards instead of delta mode.
+  if (backfillComplete) {
+    freshConfig.instantlyBackfillComplete = true;
   }
   // In delta mode, save the newest fetched email ID as the precise stop marker
   // for the next run. This replaces the pctNew heuristic — we stop exactly
