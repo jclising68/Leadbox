@@ -157,7 +157,7 @@ function activityToPayload(
     eventType: activity.type,
     direction,
     channel: "EMAIL",
-    prospectEmail: activity.leadEmail || activity.email,
+    prospectEmail: activity.leadEmail || activity.email || (direction === "INBOUND" ? activity.fromEmail : undefined),
     prospectFirstName: activity.leadFirstName,
     prospectLastName: activity.leadLastName,
     prospectCompany: activity.leadCompanyName,
@@ -330,7 +330,7 @@ export async function syncLemlist(
       break;
     }
 
-    const prospectEmail = activity.leadEmail || activity.email;
+    const prospectEmail = activity.leadEmail || activity.email || (direction === "INBOUND" ? activity.fromEmail : undefined);
     if (!prospectEmail) {
       skipped++;
       continue;
