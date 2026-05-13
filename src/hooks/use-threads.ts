@@ -7,15 +7,22 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 type ProviderSyncResult =
-  | { ok: true; provider: "INSTANTLY" | "HEYREACH"; tagCount: number }
-  | { ok: false; provider: "INSTANTLY" | "HEYREACH" | "NONE"; error: string };
+  | { ok: true; provider: "INSTANTLY" | "HEYREACH" | "LEMLIST"; tagCount: number }
+  | { ok: false; provider: "INSTANTLY" | "HEYREACH" | "LEMLIST" | "NONE"; error: string };
+
+const PROVIDER_DISPLAY: Record<string, string> = {
+  INSTANTLY: "Instantly",
+  HEYREACH: "HeyReach",
+  LEMLIST: "Lemlist",
+};
 
 function reportProviderSync(result?: ProviderSyncResult) {
   if (!result) return;
+  const name = PROVIDER_DISPLAY[result.provider] ?? result.provider;
   if (result.ok) {
-    toast.success(`Synced to ${result.provider === "INSTANTLY" ? "Instantly" : "HeyReach"}`);
+    toast.success(`Synced to ${name}`);
   } else {
-    toast.error(`${result.provider} sync failed: ${result.error}`);
+    toast.error(`${name} sync failed: ${result.error}`);
   }
 }
 
