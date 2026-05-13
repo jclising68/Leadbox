@@ -147,6 +147,7 @@ export async function resolveThread(
         eventType: payload.eventType,
         rawPayload: payload.rawPayload as object,
         sentAt: payload.sentAt,
+        receivedAt: payload.sentAt ?? new Date(),
       },
     });
 

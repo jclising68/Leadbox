@@ -100,6 +100,7 @@ type LemlistActivity = {
   sendUserMailboxProviderId?: string;
   subject?: string;
   messagePreview?: string;
+  text?: string; // plain-text body for LinkedIn activities
   campaignId?: string;
   name?: string; // campaign name in activity
   leadFirstName?: string;
@@ -111,7 +112,7 @@ type LemlistActivity = {
 
 async function fetchActivities(
   apiKey: string,
-  type: "emailsReplied" | "emailsSent",
+  type: "emailsReplied" | "linkedinReplied" | "emailsSent" | "linkedinSent",
   offset: number
 ): Promise<LemlistActivity[]> {
   const data = (await lemlistGet(apiKey, "/activities", {
@@ -140,16 +141,41 @@ async function fetchCampaigns(apiKey: string): Promise<Map<string, string>> {
 
 function activityToPayload(
   activity: LemlistActivity,
-  bodyHtml: string | undefined,
+  bodyFromMcp: string | undefined,
   campaignMap: Map<string, string>,
   direction: "INBOUND" | "OUTBOUND"
 ): NormalizedWebhookPayload {
+  const isLinkedin = activity.type.startsWith("linkedin");
+
   const campaignName = activity.campaignId
     ? (campaignMap.get(activity.campaignId) ?? activity.name)
     : activity.name;
 
-  const bodyText = bodyHtml
-    ? bodyHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+  if (isLinkedin) {
+    // LinkedIn: MCP returns plain text in `message` field; fall back to activity.text
+    const messageText = bodyFromMcp ?? activity.text;
+    return {
+      provider: "LEMLIST",
+      eventType: activity.type,
+      direction,
+      channel: "LINKEDIN",
+      prospectEmail: activity.leadEmail || activity.email,
+      prospectFirstName: activity.leadFirstName,
+      prospectLastName: activity.leadLastName,
+      prospectCompany: activity.leadCompanyName,
+      prospectLinkedinUrl: activity.linkedinUrl,
+      messageText,
+      externalId: activity._id,
+      campaignId: activity.campaignId,
+      campaignName,
+      sentAt: activity.createdAt ? new Date(activity.createdAt) : undefined,
+      rawPayload: activity as unknown as Record<string, unknown>,
+    };
+  }
+
+  // Email activity
+  const bodyText = bodyFromMcp
+    ? bodyFromMcp.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
     : activity.messagePreview;
 
   return {
@@ -163,7 +189,7 @@ function activityToPayload(
     prospectCompany: activity.leadCompanyName,
     subject: activity.subject,
     bodyText,
-    bodyHtml,
+    bodyHtml: bodyFromMcp,
     fromEmail:
       direction === "INBOUND"
         ? activity.fromEmail || activity.leadEmail
@@ -234,7 +260,7 @@ export async function syncLemlist(
   const newReplied: LemlistActivity[] = [];
   const newSent: LemlistActivity[] = [];
 
-  for (const type of ["emailsReplied", "emailsSent"] as const) {
+  for (const type of ["emailsReplied", "linkedinReplied", "emailsSent", "linkedinSent"] as const) {
     let offset = 0;
     let done = false;
     while (!done) {
@@ -251,7 +277,8 @@ export async function syncLemlist(
       }
 
       const newInPage = page.filter((a) => !existingIds.has(a._id));
-      if (type === "emailsReplied") newReplied.push(...newInPage);
+      const isInbound = type === "emailsReplied" || type === "linkedinReplied";
+      if (isInbound) newReplied.push(...newInPage);
       else newSent.push(...newInPage);
 
       // Early termination: if all are old AND backfill was done before, stop
@@ -263,8 +290,8 @@ export async function syncLemlist(
       offset += PAGE_SIZE;
       if (page.length < PAGE_SIZE) {
         done = true;
-        if (type === "emailsSent") {
-          // Mark backfill complete only after walking both lists end-to-end
+        if (type === "linkedinSent") {
+          // Mark backfill complete only after walking all four lists end-to-end
           config.lemlistBackfillComplete = true;
         }
       }
@@ -332,13 +359,14 @@ export async function syncLemlist(
 
     const prospectEmail = activity.leadEmail || activity.email || (direction === "INBOUND" ? activity.fromEmail : undefined);
     if (!prospectEmail) {
+      console.warn(`[lemlist-sync] Skipping activity ${activity._id} (${activity.type}) — no prospectEmail. Fields: leadEmail=${activity.leadEmail}, email=${activity.email}, fromEmail=${activity.fromEmail}`);
       skipped++;
       continue;
     }
 
     try {
-      const bodyHtml = direction === "INBOUND" ? bodyMap.get(activity._id) : undefined;
-      const payload = activityToPayload(activity, bodyHtml, campaignMap, direction);
+      const bodyFromMcp = direction === "INBOUND" ? bodyMap.get(activity._id) : undefined;
+      const payload = activityToPayload(activity, bodyFromMcp, campaignMap, direction);
       await resolveThread(workspaceId, integrationId, payload);
       synced++;
     } catch (err) {
