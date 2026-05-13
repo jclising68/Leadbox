@@ -94,6 +94,7 @@ model Workspace {
   webhookLogs  WebhookLog[]
   apiKeys      WorkspaceApiKey[]
   aiDrafts     AiDraft[]
+  smtpChannels SmtpChannel[]
 }
 
 enum AiReplyMode {
@@ -354,6 +355,28 @@ enum LabelSource {
   MANUAL
   AUTO_AI
   WEBHOOK
+}
+
+// ─── SMTP CHANNELS ───────────────────────────────────
+
+model SmtpChannel {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  email             String
+  displayName       String?
+  smtpHost          String
+  smtpPort          Int
+  smtpSecure        Boolean   @default(true)
+  smtpUser          String
+  smtpPassEncrypted String
+  smtpPassIv        String
+  smtpPassTag       String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId])
 }
 
 // ─── WEBHOOK LOGS ────────────────────────────────────

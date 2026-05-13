@@ -176,16 +176,26 @@ export function useRemoveLabel() {
   });
 }
 
+export type ReplyAttachment = { name: string; url: string; type: string };
+
 export function useSendReply() {
   const queryClient = useQueryClient();
   const workspaceId = useCurrentWorkspaceId();
 
   return useMutation({
-    mutationFn: async ({ threadId, body }: { threadId: string; body: string }) => {
+    mutationFn: async ({
+      threadId,
+      body,
+      attachments,
+    }: {
+      threadId: string;
+      body: string;
+      attachments?: ReplyAttachment[];
+    }) => {
       const res = await fetch(`/api/threads/${threadId}/reply`, {
         method: "POST",
         headers: buildHeaders(workspaceId!),
-        body: JSON.stringify({ body }),
+        body: JSON.stringify({ body, attachments }),
       });
       if (!res.ok) {
         const data = await res.json();

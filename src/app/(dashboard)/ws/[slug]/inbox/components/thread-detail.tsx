@@ -1,6 +1,6 @@
 "use client";
 
-import { useThread, useUpdateThread, useAddLabel, useRemoveLabel, useSendReply } from "@/hooks/use-threads";
+import { useThread, useUpdateThread, useAddLabel, useRemoveLabel, useSendReply, type ReplyAttachment } from "@/hooks/use-threads";
 import { useLabels } from "@/hooks/use-labels";
 import { useInboxStore } from "@/stores/inbox-store";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -42,6 +42,7 @@ import {
   FileText,
   MessageSquare,
   Send,
+  Paperclip,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -100,8 +101,11 @@ export function ThreadDetail() {
   const removeLabel = useRemoveLabel();
   const sendReply = useSendReply();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const attachFileRef = useRef<HTMLInputElement>(null);
   const [replyText, setReplyText] = useState("");
   const [draftApplied, setDraftApplied] = useState(false);
+  const [attachments, setAttachments] = useState<ReplyAttachment[]>([]);
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   // Fetch AI draft for the current thread
   const { data: aiDraft } = useQuery({
@@ -134,6 +138,7 @@ export function ThreadDetail() {
   useEffect(() => {
     setReplyText("");
     setDraftApplied(false);
+    setAttachments([]);
   }, [selectedThreadId]);
 
   // Mark as read when viewing
@@ -149,6 +154,33 @@ export function ThreadDetail() {
       messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
     }
   }, [thread?.id, thread?.messages?.length]);
+
+  async function handleAttachFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !workspaceId) return;
+    e.target.value = "";
+    setUploadingFile(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("threadId", selectedThreadId ?? "");
+      const res = await fetch("/api/attachments", {
+        method: "POST",
+        headers: { "x-workspace-id": workspaceId },
+        body: form,
+      });
+      const json = await res.json() as { url?: string; name?: string; type?: string; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Upload failed");
+      setAttachments((prev) => [
+        ...prev,
+        { name: json.name!, url: json.url!, type: json.type! },
+      ]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploadingFile(false);
+    }
+  }
 
   if (!selectedThreadId) return null;
 
@@ -400,6 +432,7 @@ export function ThreadDetail() {
                 campaignName: string | null;
                 sentAt: string | null;
                 receivedAt: string;
+                rawPayload: Record<string, unknown> | null;
                 integration: { name: string; provider: string } | null;
               }) => (
                 <div
@@ -454,9 +487,7 @@ export function ThreadDetail() {
                     </span>
                   </div>
 
-                  {/* Bubble: prospect messages sit on a neutral surface; our
-                      replies use the primary fill. Caps at 80% width so long
-                      messages wrap instead of spanning the whole pane. */}
+                  {/* Bubble */}
                   <div
                     className={cn(
                       "rounded-2xl px-4 py-3 text-sm leading-relaxed max-w-[80%] ring-1 ring-inset",
@@ -468,6 +499,29 @@ export function ThreadDetail() {
                     <div className="whitespace-pre-wrap break-words">
                       {msg.bodyText || msg.messageText || msg.subject || "No content"}
                     </div>
+
+                    {/* Attachments */}
+                    {(() => {
+                      const raw = msg.rawPayload as { attachments?: Array<{ name: string; url: string; type: string }> } | null;
+                      const atts = raw?.attachments;
+                      if (!atts?.length) return null;
+                      return (
+                        <div className="mt-2 pt-2 border-t border-white/20 flex flex-wrap gap-1.5">
+                          {atts.map((a, i) => (
+                            <a
+                              key={i}
+                              href={a.url.startsWith("/") ? a.url : a.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-white/15 hover:bg-white/25 transition-colors max-w-[200px]"
+                            >
+                              <Paperclip className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{a.name}</span>
+                            </a>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               )
@@ -496,6 +550,14 @@ export function ThreadDetail() {
 
         {/* Reply composer */}
         <div className="border-t border-border bg-card/40 px-4 py-3 shrink-0">
+          {/* Hidden file input */}
+          <input
+            ref={attachFileRef}
+            type="file"
+            className="hidden"
+            onChange={handleAttachFile}
+          />
+
           {/* AI Draft badge row */}
           {aiDraft?.status === "PENDING" && (
             <div className="flex items-center gap-1.5 mb-2 text-xs text-muted-foreground">
@@ -528,6 +590,29 @@ export function ThreadDetail() {
               </button>
             </div>
           )}
+
+          {/* Attachment chips */}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {attachments.map((a, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-muted border border-border max-w-[200px]"
+                >
+                  <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{a.name}</span>
+                  <button
+                    type="button"
+                    className="shrink-0 text-muted-foreground hover:text-destructive ml-0.5"
+                    onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
           <textarea
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm min-h-[60px] max-h-[160px] resize-none focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring/60 placeholder:text-muted-foreground transition-colors"
             placeholder={
@@ -542,11 +627,12 @@ export function ThreadDetail() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && replyText.trim() && !sendReply.isPending) {
                 sendReply.mutate(
-                  { threadId: selectedThreadId!, body: replyText.trim() },
+                  { threadId: selectedThreadId!, body: replyText.trim(), attachments },
                   {
                     onSuccess: () => {
                       setReplyText("");
                       setDraftApplied(false);
+                      setAttachments([]);
                       toast.success("Message sent");
                     },
                     onError: (err) => toast.error(err.message),
@@ -557,20 +643,38 @@ export function ThreadDetail() {
             disabled={sendReply.isPending}
           />
           <div className="flex items-center justify-between mt-2">
-            <span className="text-xs text-muted-foreground">
-              {thread?.channel === "LINKEDIN" ? "LinkedIn message" : "Email reply"} · Cmd+Enter to send
-            </span>
+            <div className="flex items-center gap-2">
+              {thread?.channel === "EMAIL" && (
+                <button
+                  type="button"
+                  title="Attach file"
+                  disabled={uploadingFile || sendReply.isPending}
+                  onClick={() => attachFileRef.current?.click()}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
+                >
+                  {uploadingFile ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Paperclip className="h-4 w-4" />
+                  )}
+                </button>
+              )}
+              <span className="text-xs text-muted-foreground">
+                {thread?.channel === "LINKEDIN" ? "LinkedIn message" : "Email reply"} · Cmd+Enter to send
+              </span>
+            </div>
             <Button
               size="sm"
               className="gap-1.5"
               disabled={!replyText.trim() || sendReply.isPending}
               onClick={() => {
                 sendReply.mutate(
-                  { threadId: selectedThreadId!, body: replyText.trim() },
+                  { threadId: selectedThreadId!, body: replyText.trim(), attachments },
                   {
                     onSuccess: () => {
                       setReplyText("");
                       setDraftApplied(false);
+                      setAttachments([]);
                       toast.success("Message sent");
                     },
                     onError: (err) => toast.error(err.message),

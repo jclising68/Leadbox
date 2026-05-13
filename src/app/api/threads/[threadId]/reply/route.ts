@@ -4,6 +4,7 @@ import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { replyViaInstantly } from "@/services/instantly-reply";
 import { replyViaHeyreach } from "@/services/heyreach-reply";
 import { replyViaLemlist } from "@/services/lemlist-reply";
+import { replyViaSmtp, type SmtpAttachment } from "@/services/smtp-reply";
 
 export async function POST(
   req: NextRequest,
@@ -13,7 +14,10 @@ export async function POST(
   if (error) return error;
 
   const { threadId } = await params;
-  const { body } = await req.json();
+  const { body, attachments } = await req.json() as {
+    body: string;
+    attachments?: SmtpAttachment[];
+  };
 
   if (!body || !body.trim()) {
     return NextResponse.json(
@@ -21,6 +25,8 @@ export async function POST(
       { status: 400 }
     );
   }
+
+  const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
 
   // Get thread with channel info
   const thread = await prisma.thread.findFirst({
@@ -32,7 +38,22 @@ export async function POST(
     return NextResponse.json({ error: "Thread not found" }, { status: 404 });
   }
 
-  // Find the integration that owns this thread by looking at the most recent message
+  // If attachments present on an email thread, route via SMTP directly
+  if (hasAttachments && thread.channel === "EMAIL") {
+    try {
+      const bodyHtml = body.replace(/\n/g, "<br>");
+      const result = await replyViaSmtp(workspaceId!, threadId, bodyHtml, attachments!);
+      return NextResponse.json({ success: true, messageId: result.messageId });
+    } catch (err) {
+      console.error("[reply] SMTP send failed:", err instanceof Error ? err.message : err);
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Failed to send via SMTP" },
+        { status: 500 }
+      );
+    }
+  }
+
+  // Standard path: route through provider API (no attachments)
   const lastMsg = await prisma.message.findFirst({
     where: { threadId, integrationId: { not: null } },
     orderBy: { sentAt: "desc" },
@@ -45,7 +66,6 @@ export async function POST(
       })
     : null;
 
-  // Fallback: if the original integration was deleted/disabled, find any active one for this channel
   if (!integration) {
     integration = await prisma.integration.findFirst({
       where: {
@@ -71,7 +91,6 @@ export async function POST(
   try {
     let result;
     if (thread.channel === "EMAIL") {
-      // Both Instantly and Lemlist expect HTML; convert plain-text newlines
       const bodyHtml = body.replace(/\n/g, "<br>");
       if (integration.provider === "LEMLIST") {
         result = await replyViaLemlist(integration.id, threadId, bodyHtml);

@@ -4,7 +4,8 @@ import { useThreads } from "@/hooks/use-threads";
 import { useInboxStore } from "@/stores/inbox-store";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { cn } from "@/lib/utils";
-import { Mail, Loader2, Filter, X, SlidersHorizontal, RefreshCw, Search, ArrowDownNarrowWide, ArrowUpNarrowWide } from "lucide-react";
+import { Mail, Loader2, Filter, X, SlidersHorizontal, RefreshCw, Search, ArrowDownNarrowWide, ArrowUpNarrowWide, SquarePen } from "lucide-react";
+import { ComposeDialog } from "./compose-dialog";
 import Image from "next/image";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQueryClient } from "@tanstack/react-query";
@@ -62,8 +63,10 @@ export function ThreadList() {
     sortDir, setSortDir,
     searchQuery, setSearchQuery,
     clearFilters,
+    isOutbound,
   } = useInboxStore();
   const [showFilters, setShowFilters] = useState(false);
+  const [showCompose, setShowCompose] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const workspaceId = useCurrentWorkspaceId();
   const queryClient = useQueryClient();
@@ -220,8 +223,18 @@ export function ThreadList() {
             >
               <SlidersHorizontal className="h-3.5 w-3.5" />
             </button>
+            {isOutbound && (
+              <button
+                onClick={() => setShowCompose(true)}
+                className="flex items-center justify-center w-6 h-6 rounded transition-colors text-muted-foreground hover:text-foreground"
+                title="Compose new email"
+              >
+                <SquarePen className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
+        <ComposeDialog open={showCompose} onClose={() => setShowCompose(false)} />
 
         {/* Filter bar */}
         {showFilters && (

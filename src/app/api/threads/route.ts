@@ -94,11 +94,10 @@ export async function GET(req: NextRequest) {
     andConditions.push({ prospect: { campaignName: { not: null } } });
   }
 
-  // Default inbox view ("All messages" tab, OPEN status, no label selected):
-  // only show threads where the prospect actually replied (has an INBOUND message).
-  // Sent-only threads belong in the leads tracker, not inbox.
-  // Label-tab clicks, Archive, Spam, Trash, and ALL views skip this filter.
-  if (!labelId && (status === "OPEN" || !status)) {
+  // Main inbox default view: only show threads where the prospect replied (has INBOUND).
+  // Outbound inbox skips this — composed/direct emails are outbound-only by design.
+  // Label-tab clicks, Archive, Spam, Trash, and ALL views also skip this filter.
+  if (!outbound && !labelId && (status === "OPEN" || !status)) {
     andConditions.push({
       messages: { some: { direction: "INBOUND" } },
     });
