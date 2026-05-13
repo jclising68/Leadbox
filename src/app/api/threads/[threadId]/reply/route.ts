@@ -52,14 +52,14 @@ export async function POST(
         workspaceId: workspaceId!,
         provider: thread.channel === "EMAIL"
           ? { in: ["INSTANTLY", "LEMLIST"] }
-          : { equals: "HEYREACH" },
+          : { in: ["HEYREACH", "LEMLIST"] },
         isActive: true,
       },
     });
   }
 
   if (!integration) {
-    const providerDesc = thread.channel === "EMAIL" ? "Instantly or Lemlist" : "HeyReach";
+    const providerDesc = thread.channel === "EMAIL" ? "Instantly or Lemlist" : "HeyReach or Lemlist";
     return NextResponse.json(
       {
         error: `No active ${providerDesc} integration found. Add one in Settings > Integrations.`,
@@ -79,7 +79,11 @@ export async function POST(
         result = await replyViaInstantly(integration.id, threadId, bodyHtml);
       }
     } else {
-      result = await replyViaHeyreach(integration.id, threadId, body);
+      if (integration.provider === "LEMLIST") {
+        result = await replyViaLemlist(integration.id, threadId, body);
+      } else {
+        result = await replyViaHeyreach(integration.id, threadId, body);
+      }
     }
 
     return NextResponse.json({

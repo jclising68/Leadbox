@@ -2,8 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
 
 export type ProviderSyncResult =
-  | { ok: true; provider: "INSTANTLY" | "HEYREACH"; tagCount: number }
-  | { ok: false; provider: "INSTANTLY" | "HEYREACH" | "NONE"; error: string };
+  | { ok: true; provider: "INSTANTLY" | "HEYREACH" | "LEMLIST"; tagCount: number }
+  | { ok: false; provider: "INSTANTLY" | "HEYREACH" | "LEMLIST" | "NONE"; error: string };
 
 /**
  * Push the *full* current label set for a thread to the upstream provider
@@ -32,15 +32,40 @@ export async function syncProviderTags(
     new Set(thread.threadLabels.map((tl) => tl.label.name).filter(Boolean))
   );
 
-  const provider = thread.channel === "EMAIL" ? "INSTANTLY" : "HEYREACH";
-  const integration = await prisma.integration.findFirst({
-    where: { workspaceId, provider, isActive: true },
+  // Resolve integration from the thread's messages (same lookup used by reply route).
+  // This correctly handles Lemlist threads which can be EMAIL or LINKEDIN channel.
+  const lastMsg = await prisma.message.findFirst({
+    where: { threadId, integrationId: { not: null } },
+    orderBy: { sentAt: "desc" },
+    select: { integrationId: true },
   });
+
+  let integration = lastMsg?.integrationId
+    ? await prisma.integration.findFirst({
+        where: { id: lastMsg.integrationId, isActive: true },
+      })
+    : null;
+
+  // Fallback: any active integration for this channel
   if (!integration) {
-    const msg = `no active ${provider} integration for this workspace`;
-    console.warn(`[provider-tags] ${msg}`);
-    return { ok: false, provider, error: msg };
+    integration = await prisma.integration.findFirst({
+      where: {
+        workspaceId,
+        provider: thread.channel === "EMAIL"
+          ? { in: ["INSTANTLY", "LEMLIST"] }
+          : { in: ["HEYREACH", "LEMLIST"] },
+        isActive: true,
+      },
+    });
   }
+
+  if (!integration) {
+    const msg = "no active integration for this workspace";
+    console.warn(`[provider-tags] ${msg}`);
+    return { ok: false, provider: "NONE", error: msg };
+  }
+
+  const provider = integration.provider as "INSTANTLY" | "HEYREACH" | "LEMLIST";
 
   const apiKey = decrypt(
     integration.apiKeyEncrypted,
@@ -49,7 +74,15 @@ export async function syncProviderTags(
   );
 
   try {
-    if (provider === "INSTANTLY") {
+    if (provider === "LEMLIST") {
+      if (!thread.prospect.email) {
+        const msg = "thread has no prospect email";
+        console.warn(`[provider-tags] ${msg}`);
+        return { ok: false, provider, error: msg };
+      }
+      await pushLemlistStatus(apiKey, thread.prospect.email, tags);
+      console.log(`[provider-tags] ✓ pushed ${tags.length} tag(s) to Lemlist for ${thread.prospect.email}`);
+    } else if (provider === "INSTANTLY") {
       if (!thread.prospect.email) {
         const msg = "thread has no prospect email";
         console.warn(`[provider-tags] ${msg}`);
@@ -71,6 +104,25 @@ export async function syncProviderTags(
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[provider-tags] ✗ failed to push to ${provider}:`, message);
     return { ok: false, provider, error: message };
+  }
+}
+
+// ────────────────────────── Lemlist ──────────────────────────
+
+const LEMLIST_API_BASE = "https://api.lemlist.com/api";
+
+async function pushLemlistStatus(apiKey: string, email: string, tags: string[]) {
+  const statusValue = tags.join(" | ");
+  const url = new URL(`${LEMLIST_API_BASE}/leads/${encodeURIComponent(email)}`);
+  url.searchParams.set("access_token", apiKey);
+  const res = await fetch(url.toString(), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ "Lead Status": statusValue }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Lemlist PATCH leads ${res.status}: ${text}`);
   }
 }
 

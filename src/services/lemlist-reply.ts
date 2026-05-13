@@ -13,16 +13,26 @@ function computeReplyExternalId(threadId: string, body: string): string {
   return `lm_reply_${threadId}_${hash}`;
 }
 
+type LemlistMcpSendArgs =
+  | {
+      channel: "email";
+      sendUserId: string;
+      contactId: string;
+      sendUserEmail: string;
+      sendUserMailboxId: string;
+      subject: string;
+      message: string;
+    }
+  | {
+      channel: "linkedin";
+      sendUserId: string;
+      contactId: string;
+      message: string;
+    };
+
 async function lemlistMcpSendMessage(
   apiKey: string,
-  args: {
-    sendUserId: string;
-    contactId: string;
-    sendUserEmail: string;
-    sendUserMailboxId: string;
-    subject: string;
-    message: string;
-  }
+  args: LemlistMcpSendArgs
 ): Promise<void> {
   const res = await fetch(LEMLIST_MCP_URL, {
     method: "POST",
@@ -36,10 +46,7 @@ async function lemlistMcpSendMessage(
       method: "tools/call",
       params: {
         name: "send_message",
-        arguments: {
-          channel: "email",
-          ...args,
-        },
+        arguments: args,
       },
     }),
   });
@@ -122,7 +129,10 @@ export async function replyViaLemlist(
     }
   }
 
-  // Extract sendUserId, sendUserEmail, sendUserMailboxId, contactId from rawPayload
+  const isLinkedin = thread.channel === "LINKEDIN";
+
+  // Extract sendUserId, contactId (required for both channels)
+  // Plus email-only fields: sendUserEmail, sendUserMailboxId, subject
   let sendUserId: string | undefined;
   let sendUserEmail: string | undefined;
   let sendUserMailboxId: string | undefined;
@@ -144,24 +154,41 @@ export async function replyViaLemlist(
       subject = /^re:\s/i.test(s) ? s : `Re: ${s}`;
     }
 
-    if (sendUserId && sendUserEmail && sendUserMailboxId && contactId) break;
+    if (isLinkedin) {
+      if (sendUserId && contactId) break;
+    } else {
+      if (sendUserId && sendUserEmail && sendUserMailboxId && contactId) break;
+    }
   }
 
-  if (!sendUserId || !contactId || !sendUserEmail || !sendUserMailboxId) {
-    throw new Error(
-      "Could not determine the Lemlist sender account for this thread. Click the inbox refresh icon to re-sync, then try again."
-    );
+  if (isLinkedin) {
+    if (!sendUserId || !contactId) {
+      throw new Error(
+        "Could not determine the Lemlist LinkedIn sender for this thread. Click the inbox refresh icon to re-sync, then try again."
+      );
+    }
+    await lemlistMcpSendMessage(apiKey, {
+      channel: "linkedin",
+      sendUserId,
+      contactId,
+      message: body,
+    });
+  } else {
+    if (!sendUserId || !contactId || !sendUserEmail || !sendUserMailboxId) {
+      throw new Error(
+        "Could not determine the Lemlist sender account for this thread. Click the inbox refresh icon to re-sync, then try again."
+      );
+    }
+    await lemlistMcpSendMessage(apiKey, {
+      channel: "email",
+      sendUserId,
+      contactId,
+      sendUserEmail,
+      sendUserMailboxId,
+      subject,
+      message: body,
+    });
   }
-
-  // Send via Lemlist MCP
-  await lemlistMcpSendMessage(apiKey, {
-    sendUserId,
-    contactId,
-    sendUserEmail,
-    sendUserMailboxId,
-    subject,
-    message: body,
-  });
 
   const deterministicExternalId = computeReplyExternalId(threadId, trimmed);
 
@@ -173,11 +200,15 @@ export async function replyViaLemlist(
         threadId,
         integrationId,
         direction: "OUTBOUND",
-        channel: "EMAIL",
-        fromEmail: sendUserEmail,
-        toEmail: thread.prospect.email,
-        bodyText: body.replace(/<[^>]+>/g, "").trim(),
-        bodyHtml: body,
+        channel: isLinkedin ? "LINKEDIN" : "EMAIL",
+        ...(isLinkedin
+          ? { messageText: body }
+          : {
+              fromEmail: sendUserEmail,
+              toEmail: thread.prospect.email,
+              bodyText: body.replace(/<[^>]+>/g, "").trim(),
+              bodyHtml: body,
+            }),
         externalId: deterministicExternalId,
         sentAt: new Date(),
         receivedAt: new Date(),
