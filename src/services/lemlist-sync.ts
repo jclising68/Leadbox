@@ -369,6 +369,28 @@ export async function syncLemlist(
       const payload = activityToPayload(activity, bodyFromMcp, campaignMap, direction);
       await resolveThread(workspaceId, integrationId, payload);
       synced++;
+
+      // Back-write Prospect fields for inbound replies — mirrors Instantly sync behavior.
+      // campaignName is required for threads to route to the main Inbox (not Outbound Inbox).
+      // stepReplied + notes only set if still null (never overwrite manually-entered data).
+      if (direction === "INBOUND" && prospectEmail) {
+        const firstReplyUpdate: Record<string, string> = {};
+        if (payload.campaignName) firstReplyUpdate.campaignName = payload.campaignName;
+        firstReplyUpdate.stepReplied = "Step 1";
+        if (Object.keys(firstReplyUpdate).length > 0) {
+          await prisma.prospect.updateMany({
+            where: { workspaceId, email: prospectEmail, stepReplied: null },
+            data: firstReplyUpdate,
+          });
+        }
+        const replyText = payload.messageText || payload.bodyText;
+        if (replyText) {
+          await prisma.prospect.updateMany({
+            where: { workspaceId, email: prospectEmail, notes: null },
+            data: { notes: replyText.slice(0, 500) },
+          });
+        }
+      }
     } catch (err) {
       errors++;
       if (errors <= 5) {
