@@ -186,16 +186,25 @@ export async function applyAutoLabel(
 
   if (!label) return;
 
-  // Remove other auto-applied labels (different label), keep MANUAL labels untouched.
-  // Scoped to labelId != target so the upsert below has no concurrent conflict.
+  // Replace any previous auto-applied labels — only the latest classification
+  // should be active. MANUAL labels are never touched.
   await prisma.threadLabel.deleteMany({
-    where: { threadId, source: { in: ["AUTO_AI", "WEBHOOK"] }, labelId: { not: label.id } },
+    where: { threadId, source: { in: ["AUTO_AI", "WEBHOOK"] } },
   });
 
-  // Upsert instead of create — idempotent when Instantly retries the same webhook.
-  await prisma.threadLabel.upsert({
-    where: { threadId_labelId: { threadId, labelId: label.id } },
-    update: { source, confidence, appliedAt: new Date() },
-    create: { threadId, labelId: label.id, source, confidence },
-  });
+  // Use create + catch P2002: if a MANUAL label with the same (threadId, labelId)
+  // already exists, deleteMany won't remove it, and the create would fail with a
+  // unique constraint error. Catching P2002 means we skip silently — the label is
+  // already correctly set, so no action needed. Also handles concurrent webhook
+  // retries where two requests race to create the same label.
+  try {
+    await prisma.threadLabel.create({
+      data: { threadId, labelId: label.id, source, confidence },
+    });
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "P2002") {
+      return;
+    }
+    throw err;
+  }
 }
