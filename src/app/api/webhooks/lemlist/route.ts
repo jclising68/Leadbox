@@ -113,7 +113,13 @@ export async function POST(req: NextRequest) {
         const fullBody = await fetchFullBody(apiKey, contactId, activityId);
         if (fullBody) {
           normalized.bodyHtml = fullBody;
-          normalized.bodyText = fullBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+          normalized.bodyText = fullBody
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+            .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, " ")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
         }
       }
     }

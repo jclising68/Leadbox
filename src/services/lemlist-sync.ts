@@ -175,7 +175,13 @@ function activityToPayload(
 
   // Email activity
   const bodyText = bodyFromMcp
-    ? bodyFromMcp.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+    ? bodyFromMcp
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+        .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
     : activity.messagePreview;
 
   return {
