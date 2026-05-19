@@ -6,6 +6,7 @@ import {
   Inbox,
   MailOpen,
   Briefcase,
+  BarChart2,
   Archive,
   Trash2,
   AlertCircle,
@@ -41,6 +42,7 @@ const mainNavItems = [
   { label: "Inbox", path: "/inbox", icon: Inbox, matchEnd: "/inbox" },
   { label: "Outbound Inbox", path: "/outbound-inbox", icon: MailOpen, matchEnd: "/outbound-inbox" },
   { label: "Leads", path: "/leads", icon: Briefcase, matchEnd: "/leads" },
+  { label: "KPI", path: "/kpi", icon: BarChart2, matchEnd: "/kpi" },
 ];
 
 const bottomNavItems = [

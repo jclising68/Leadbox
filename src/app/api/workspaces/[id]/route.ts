@@ -30,6 +30,7 @@ export async function PATCH(
     aiReplyProvider?: "openai" | "claude";
     aiReplyInstructions?: string | null;
     aiLabelProvider?: "openai" | "claude";
+    kpiEmbedToken?: string | null;
   };
 
   const data: {
@@ -41,6 +42,7 @@ export async function PATCH(
     aiReplyProvider?: string | null;
     aiReplyInstructions?: string | null;
     aiLabelProvider?: string | null;
+    kpiEmbedToken?: string | null;
   } = {};
 
   if (body.name !== undefined) {
@@ -76,6 +78,10 @@ export async function PATCH(
 
   if (body.aiLabelProvider === "openai" || body.aiLabelProvider === "claude") {
     data.aiLabelProvider = body.aiLabelProvider;
+  }
+
+  if (body.kpiEmbedToken !== undefined) {
+    data.kpiEmbedToken = body.kpiEmbedToken || null;
   }
 
   if (Object.keys(data).length === 0) {
