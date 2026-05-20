@@ -128,24 +128,17 @@ export default function WebhooksPage() {
   const handleTest = async (hook: OutboundWebhook) => {
     setTestingId(hook.id);
     try {
-      await fetch(hook.url, {
+      const res = await fetch(`/api/outbound-webhooks/${hook.id}/test`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event: "test",
-          email: "test@example.com",
-          firstName: "Test",
-          lastName: "Lead",
-          company: "Acme Corp",
-          domain: "acme.com",
-          campaignName: "Test Campaign",
-          label: "Interested",
-          timestamp: new Date().toISOString(),
-        }),
+        headers: { "x-workspace-id": workspaceId! },
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed" }));
+        throw new Error(err.error || "Failed");
+      }
       toast.success("Test payload sent");
-    } catch {
-      toast.error("Failed to send test");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to send test");
     } finally {
       setTestingId(null);
     }
