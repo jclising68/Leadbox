@@ -49,6 +49,7 @@ import {
   Sparkles,
   Ban,
   Trash2,
+  Download,
 } from "lucide-react";
 
 // Field-key shape for the source map; mirrors EnrichField in services/enrichment.ts.
@@ -57,6 +58,12 @@ type EnrichSource = "BLITZ" | "APOLLO" | "NOT_FOUND";
 type EnrichmentSourceMap = Partial<Record<EnrichFieldKey, EnrichSource>>;
 
 type SortConfig = { field: string; dir: "asc" | "desc" };
+
+// Returns "YYYY-MM-DD" in the client's local timezone (avoids UTC offset bugs
+// that toISOString() introduces for UTC+ locales).
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 const COLUMNS = [
   { key: "select", label: "", w: 36, sortable: false, sortField: "" },
@@ -660,6 +667,47 @@ export default function LeadsPage() {
     );
   }, []);
 
+  const handleExportCsv = useCallback(() => {
+    const headers = ["Date", "First Name", "Last Name", "Email", "Phone", "Title", "LinkedIn", "Company", "Domain", "Lead Status", "Campaign", "Label"];
+    const escape = (v: unknown) => {
+      const s = v == null ? "" : String(v);
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = (prospects as Record<string, unknown>[]).map((p) => {
+      const thread = p.thread as Record<string, unknown> | null;
+      const lastMsgAt = (thread?.lastMessageAt ?? p.lastMessageAt) as string | null;
+      const date = lastMsgAt ? new Date(lastMsgAt).toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" }) : "";
+      const latestMsg = ((thread?.messages || []) as Record<string, unknown>[])[0];
+      const campaign = (p.campaignName as string) || (latestMsg?.campaignName as string) || "";
+      const label = (() => {
+        const tl = (thread?.threadLabels as { label: { name: string } }[] | undefined) ?? [];
+        return tl.map((l) => l.label.name).join("; ");
+      })();
+      return [
+        date,
+        p.firstName,
+        p.lastName,
+        p.email,
+        p.phone,
+        p.title,
+        p.linkedinUrl,
+        p.company,
+        p.domain,
+        p.leadStatus,
+        campaign,
+        label,
+      ].map(escape).join(",");
+    });
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `leads-export-${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [prospects]);
+
   const params = useParams();
   const slug = params.slug as string;
 
@@ -853,7 +901,7 @@ export default function LeadsPage() {
                   ].map((opt) => {
                     const isActive = opt.days === 0 ? !dateFrom && !dateTo : (() => {
                       const d = new Date(); d.setDate(d.getDate() - opt.days);
-                      return dateFrom === d.toISOString().split("T")[0];
+                      return dateFrom === localDateStr(d);
                     })();
                     return (
                       <button
@@ -862,8 +910,8 @@ export default function LeadsPage() {
                           if (opt.days === 0) { setDateFrom(""); setDateTo(""); }
                           else {
                             const d = new Date(); d.setDate(d.getDate() - opt.days);
-                            setDateFrom(d.toISOString().split("T")[0]);
-                            setDateTo(new Date().toISOString().split("T")[0]);
+                            setDateFrom(localDateStr(d));
+                            setDateTo(localDateStr(new Date()));
                           }
                         }}
                         className={cn(
@@ -877,6 +925,25 @@ export default function LeadsPage() {
                       </button>
                     );
                   })}
+                  {(() => {
+                    const now = new Date();
+                    const mtdFrom = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+                    const today = localDateStr(now);
+                    const isActive = dateFrom === mtdFrom && dateTo === today;
+                    return (
+                      <button
+                        onClick={() => { setDateFrom(mtdFrom); setDateTo(today); }}
+                        className={cn(
+                          "inline-flex items-center px-2.5 py-1 rounded-md text-xs border transition-colors",
+                          isActive
+                            ? "bg-primary/10 border-primary/30 text-foreground font-medium"
+                            : "bg-card border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                        )}
+                      >
+                        Month to date
+                      </button>
+                    );
+                  })()}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -966,6 +1033,25 @@ export default function LeadsPage() {
               <X className="h-3 w-3" /> Clear
             </button>
           )}
+
+          <button
+            onClick={handleExportCsv}
+            disabled={prospects.length === 0}
+            className={cn(
+              filterTriggerBase,
+              "ml-auto",
+              prospects.length === 0
+                ? "opacity-40 cursor-not-allowed border-border text-muted-foreground"
+                : filterTriggerIdle
+            )}
+            title={`Export ${prospects.length} contact${prospects.length === 1 ? "" : "s"} as CSV`}
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>Export CSV</span>
+            {prospects.length > 0 && (
+              <span className="text-[10px] text-muted-foreground tabular-nums">({prospects.length})</span>
+            )}
+          </button>
 
           {selectedIds.size > 0 && (
             <div className="ml-auto flex items-center gap-2">
