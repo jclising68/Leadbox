@@ -8,6 +8,7 @@ import {
   classificationToLabelName,
   applyAutoLabel,
 } from "@/services/auto-labeler";
+import { fireOutboundWebhooks } from "@/services/outbound-webhooks";
 
 export async function POST(req: NextRequest) {
   try {
@@ -99,6 +100,26 @@ export async function POST(req: NextRequest) {
         }
       });
     }
+
+    // Fire outbound webhooks (reply received or tag applied) — async, never blocks response
+    after(async () => {
+      try {
+        const event = normalized.direction === "INBOUND" ? "reply_received" : "lead_tagged";
+        await fireOutboundWebhooks(workspaceId, {
+          event,
+          email: prospect.email,
+          firstName: prospect.firstName,
+          lastName: prospect.lastName,
+          company: prospect.company,
+          domain: prospect.domain,
+          campaignName: normalized.campaignName ?? null,
+          label: normalized.sourceLabel ?? null,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error("[instantly webhook] outbound webhook failed:", err);
+      }
+    });
 
     // Update log
     await prisma.webhookLog.update({

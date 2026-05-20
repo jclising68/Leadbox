@@ -92,10 +92,11 @@ model Workspace {
   prospects    Prospect[]
   threads      Thread[]
   messages     Message[]
-  webhookLogs  WebhookLog[]
-  apiKeys      WorkspaceApiKey[]
-  aiDrafts     AiDraft[]
-  smtpChannels SmtpChannel[]
+  webhookLogs       WebhookLog[]
+  apiKeys           WorkspaceApiKey[]
+  aiDrafts          AiDraft[]
+  smtpChannels      SmtpChannel[]
+  outboundWebhooks  OutboundWebhook[]
 }
 
 enum AiReplyMode {
@@ -403,4 +404,16 @@ enum WebhookStatus {
   PROCESSED
   FAILED
   SKIPPED
+}
+
+model OutboundWebhook {
+  id          String    @id @default(cuid())
+  workspaceId String
+  label       String
+  url         String
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }

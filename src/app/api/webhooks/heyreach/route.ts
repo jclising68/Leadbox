@@ -8,6 +8,7 @@ import {
   classificationToLabelName,
   applyAutoLabel,
 } from "@/services/auto-labeler";
+import { fireOutboundWebhooks } from "@/services/outbound-webhooks";
 
 export async function POST(req: NextRequest) {
   try {
@@ -118,6 +119,26 @@ export async function POST(req: NextRequest) {
     await prisma.integration.update({
       where: { id: integration.id },
       data: { lastSyncAt: new Date() },
+    });
+
+    // Fire outbound webhooks — async, never blocks response
+    after(async () => {
+      try {
+        const event = normalized.direction === "INBOUND" ? "reply_received" : "lead_tagged";
+        await fireOutboundWebhooks(workspaceId, {
+          event,
+          email: prospect.email,
+          firstName: prospect.firstName,
+          lastName: prospect.lastName,
+          company: prospect.company,
+          domain: prospect.domain,
+          campaignName: normalized.campaignName ?? null,
+          label: normalized.sourceLabel ?? null,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error("[heyreach webhook] outbound webhook failed:", err);
+      }
     });
 
     return NextResponse.json({
