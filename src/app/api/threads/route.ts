@@ -85,13 +85,20 @@ export async function GET(req: NextRequest) {
     andConditions.push({ status: { not: "TRASH" } });
   }
 
-  // Route threads by campaign association. Main inbox shows only threads whose
-  // prospect has a campaignName (i.e. came from Instantly/HeyReach/Lemlist
-  // campaigns). Outbound inbox shows the rest (direct/organic contacts).
+  // Route threads by whether any message came from a campaign integration
+  // (Instantly / HeyReach / Lemlist). This is more reliable than checking
+  // Prospect.campaignName, which is only back-written on first INBOUND reply —
+  // campaign leads that haven't replied yet had campaignName null and were
+  // incorrectly appearing in the Outbound Inbox.
+  const campaignProviders: ("INSTANTLY" | "HEYREACH" | "LEMLIST")[] = ["INSTANTLY", "HEYREACH", "LEMLIST"];
   if (outbound) {
-    andConditions.push({ prospect: { campaignName: null } });
+    andConditions.push({
+      messages: { none: { integration: { provider: { in: campaignProviders } } } },
+    });
   } else {
-    andConditions.push({ prospect: { campaignName: { not: null } } });
+    andConditions.push({
+      messages: { some: { integration: { provider: { in: campaignProviders } } } },
+    });
   }
 
   // Main inbox default view: only show threads where the prospect replied (has INBOUND).
