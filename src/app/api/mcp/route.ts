@@ -47,7 +47,7 @@ async function buildMcpServer(workspaceId: string): Promise<McpServer> {
   // ── list_threads ─────────────────────────────────────────────────────────
   server.tool(
     "list_threads",
-    "List inbox threads for the workspace. Defaults to open unread threads.",
+    "List campaign threads where the lead has replied. Only returns threads from Instantly/HeyReach/Lemlist campaigns that have at least one inbound reply. Defaults to open unread threads.",
     {
       status: z.enum(["OPEN", "ARCHIVED", "ALL"]).optional().describe("Thread status filter (OPEN, ARCHIVED, ALL)"),
       unread_only: z.boolean().optional().describe("Only return unread threads"),
@@ -55,9 +55,18 @@ async function buildMcpServer(workspaceId: string): Promise<McpServer> {
       label: z.string().optional().describe("Filter by label name"),
     },
     async ({ status = "OPEN", unread_only = true, limit = 20, label }) => {
+      const campaignProviders: ("INSTANTLY" | "HEYREACH" | "LEMLIST")[] = ["INSTANTLY", "HEYREACH", "LEMLIST"];
       const threads = await prisma.thread.findMany({
         where: {
           workspaceId,
+          // Only campaign threads (Instantly/HeyReach/Lemlist) that have a real inbound reply.
+          // Organic/compose contacts (Outbound Inbox) are excluded — the agent only handles campaign replies.
+          messages: {
+            some: { integration: { provider: { in: campaignProviders } } },
+          },
+          AND: [
+            { messages: { some: { direction: "INBOUND" } } },
+          ],
           ...(status !== "ALL" ? { status: status as "OPEN" | "ARCHIVED" } : {}),
           ...(unread_only ? { isUnread: true } : {}),
           ...(label
