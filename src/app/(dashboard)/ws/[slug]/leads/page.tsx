@@ -79,6 +79,7 @@ const COLUMNS = [
   { key: "domain", label: "Domain", w: 130, sortable: true, sortField: "domain" },
   { key: "leadStatus", label: "Lead Status", w: 140, sortable: false, sortField: "" },
   { key: "campaign", label: "Campaign", w: 170, sortable: false, sortField: "" },
+  { key: "channel", label: "Source", w: 90, sortable: false, sortField: "" },
   { key: "step", label: "Step Replied", w: 100, sortable: false, sortField: "" },
   { key: "notes", label: "Notes", w: 140, sortable: false, sortField: "" },
   { key: "feedback", label: "Feedback", w: 140, sortable: false, sortField: "" },
@@ -1357,19 +1358,24 @@ export default function LeadsPage() {
                     />
                   </div>
 
+                  {/* Source (Email / LinkedIn) */}
+                  <div className="shrink-0 px-3 text-xs text-muted-foreground" style={{ width: `${COLUMNS[13].w}px` }}>
+                    {channel === "LINKEDIN" ? "LinkedIn" : channel === "EMAIL" ? "Email" : "-"}
+                  </div>
+
                   {/* Step Replied */}
                   <div
                     className={cn(
                       "shrink-0 px-3 text-xs tabular-nums",
                       stepReplied ? "text-muted-foreground" : "text-muted-foreground/60"
                     )}
-                    style={{ width: `${COLUMNS[13].w}px` }}
+                    style={{ width: `${COLUMNS[14].w}px` }}
                   >
                     {stepReplied || "-"}
                   </div>
 
                   {/* Notes */}
-                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[14].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[15].w}px` }}>
                     <EditableCell
                       prospectId={p.id as string}
                       field="notes"
@@ -1379,7 +1385,7 @@ export default function LeadsPage() {
                   </div>
 
                   {/* Feedback */}
-                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[15].w}px` }}>
+                  <div className="shrink-0 px-3 text-xs truncate" style={{ width: `${COLUMNS[16].w}px` }}>
                     <EditableCell
                       prospectId={p.id as string}
                       field="feedback"

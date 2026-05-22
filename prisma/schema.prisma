@@ -412,6 +412,8 @@ model OutboundWebhook {
   label       String
   url         String
   isActive    Boolean   @default(true)
+  triggers    String[]  @default([])
+  tagFilters  String[]  @default([])
   createdAt   DateTime  @default(now())
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { workspaceJson } from "@/lib/api-response";
 import { syncProviderTags } from "@/services/provider-tags";
+import { fireOutboundWebhooks } from "@/services/outbound-webhooks";
 import type { Prisma } from "@prisma/client";
 
 export async function PATCH(req: NextRequest) {
@@ -39,7 +40,7 @@ export async function PATCH(req: NextRequest) {
   // Ensure the prospect belongs to this workspace (include thread for tag sync)
   const prospect = await prisma.prospect.findFirst({
     where: { id, workspaceId: workspaceId! },
-    include: { thread: { select: { id: true } } },
+    include: { thread: { select: { id: true, channel: true } } },
   });
 
   if (!prospect) {
@@ -90,6 +91,28 @@ export async function PATCH(req: NextRequest) {
 
     // Push updated tags to Instantly/HeyReach
     providerSync = await syncProviderTags(workspaceId!, threadId);
+
+    // Fire outbound webhooks for lead_tagged if a tag was applied (not cleared)
+    if (leadStatus) {
+      fireOutboundWebhooks(workspaceId!, {
+        event: "lead_tagged",
+        email: updated.email,
+        firstName: updated.firstName,
+        lastName: updated.lastName,
+        company: updated.company,
+        domain: updated.domain,
+        phone: updated.phone ?? null,
+        title: updated.title ?? null,
+        linkedinUrl: updated.linkedinUrl ?? null,
+        source: prospect.thread?.channel === "LINKEDIN" ? "LinkedIn" : "Email",
+        campaignName: updated.campaignName ?? null,
+        stepReplied: updated.stepReplied ?? null,
+        label: leadStatus,
+        notes: updated.notes ?? null,
+        feedback: updated.feedback ?? null,
+        timestamp: new Date().toISOString(),
+      }).catch((err) => console.error("[prospects patch] outbound webhook failed:", err));
+    }
   }
 
   return NextResponse.json({ prospect: updated, providerSync });

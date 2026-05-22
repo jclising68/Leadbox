@@ -7,16 +7,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (error) return error;
 
   const { id } = await params;
-  const { isActive } = (await req.json()) as { isActive?: boolean };
+  const { isActive, triggers } = (await req.json()) as { isActive?: boolean; triggers?: string[] };
 
   const hook = await prisma.outboundWebhook.findUnique({ where: { id } });
   if (!hook || hook.workspaceId !== workspaceId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  const validTriggers = ["reply_received", "lead_tagged"];
+  const data: { isActive?: boolean; triggers?: string[] } = {
+    isActive: isActive ?? hook.isActive,
+  };
+  if (triggers !== undefined) {
+    data.triggers = triggers.filter((t) => validTriggers.includes(t));
+  }
+
   const updated = await prisma.outboundWebhook.update({
     where: { id },
-    data: { isActive: isActive ?? hook.isActive },
+    data,
   });
 
   return NextResponse.json(updated);

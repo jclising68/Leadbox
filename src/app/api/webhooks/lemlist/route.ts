@@ -9,6 +9,7 @@ import {
   classificationToLabelName,
   applyAutoLabel,
 } from "@/services/auto-labeler";
+import { fireOutboundWebhooks } from "@/services/outbound-webhooks";
 
 const LEMLIST_MCP_URL = "https://app.lemlist.com/mcp";
 
@@ -124,7 +125,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const { thread, message } = await resolveThread(
+    const { thread, message, prospect } = await resolveThread(
       workspaceId,
       integration.id,
       normalized
@@ -146,6 +147,31 @@ export async function POST(req: NextRequest) {
           }
         } catch (err) {
           console.error("[lemlist webhook] auto-classify failed:", err);
+        }
+      });
+
+      after(async () => {
+        try {
+          await fireOutboundWebhooks(workspaceId, {
+            event: "reply_received",
+            email: prospect.email,
+            firstName: prospect.firstName,
+            lastName: prospect.lastName,
+            company: prospect.company,
+            domain: prospect.domain,
+            phone: prospect.phone ?? null,
+            title: prospect.title ?? null,
+            linkedinUrl: prospect.linkedinUrl ?? null,
+            source: "Email",
+            campaignName: normalized.campaignName ?? null,
+            stepReplied: prospect.stepReplied ?? null,
+            label: prospect.leadStatus ?? null,
+            notes: prospect.notes ?? null,
+            feedback: prospect.feedback ?? null,
+            timestamp: new Date().toISOString(),
+          });
+        } catch (err) {
+          console.error("[lemlist webhook] outbound webhook failed:", err);
         }
       });
     }

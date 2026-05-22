@@ -101,25 +101,33 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Fire outbound webhooks (reply received or tag applied) — async, never blocks response
-    after(async () => {
-      try {
-        const event = normalized.direction === "INBOUND" ? "reply_received" : "lead_tagged";
-        await fireOutboundWebhooks(workspaceId, {
-          event,
-          email: prospect.email,
-          firstName: prospect.firstName,
-          lastName: prospect.lastName,
-          company: prospect.company,
-          domain: prospect.domain,
-          campaignName: normalized.campaignName ?? null,
-          label: normalized.sourceLabel ?? null,
-          timestamp: new Date().toISOString(),
-        });
-      } catch (err) {
-        console.error("[instantly webhook] outbound webhook failed:", err);
-      }
-    });
+    // Fire outbound webhooks for every inbound reply — async, never blocks response
+    if (normalized.direction === "INBOUND") {
+      after(async () => {
+        try {
+          await fireOutboundWebhooks(workspaceId, {
+            event: "reply_received",
+            email: prospect.email,
+            firstName: prospect.firstName,
+            lastName: prospect.lastName,
+            company: prospect.company,
+            domain: prospect.domain,
+            phone: prospect.phone ?? null,
+            title: prospect.title ?? null,
+            linkedinUrl: prospect.linkedinUrl ?? null,
+            source: thread.channel === "LINKEDIN" ? "LinkedIn" : "Email",
+            campaignName: normalized.campaignName ?? null,
+            stepReplied: prospect.stepReplied ?? null,
+            label: prospect.leadStatus ?? null,
+            notes: prospect.notes ?? null,
+            feedback: prospect.feedback ?? null,
+            timestamp: new Date().toISOString(),
+          });
+        } catch (err) {
+          console.error("[instantly webhook] outbound webhook failed:", err);
+        }
+      });
+    }
 
     // Update log
     await prisma.webhookLog.update({
