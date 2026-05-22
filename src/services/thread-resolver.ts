@@ -35,12 +35,17 @@ export async function resolveThread(
 
     if (!thread) {
       try {
+        // Campaign outbound threads start ARCHIVED — they surface in Archive until
+        // the lead replies, at which point the first INBOUND message flips them OPEN.
+        // Compose (no integrationId) and inbound-first threads start OPEN.
+        const initialStatus =
+          integrationId && payload.direction === "OUTBOUND" ? "ARCHIVED" : "OPEN";
         thread = await tx.thread.create({
           data: {
             workspaceId,
             prospectId: prospect.id,
             channel: payload.channel,
-            status: "OPEN",
+            status: initialStatus,
             isUnread: payload.direction === "INBOUND",
             lastMessageAt: payload.sentAt || new Date(),
           },
@@ -177,12 +182,21 @@ export async function resolveThread(
     const shouldUpdateChannel =
       isNewerThanLast && payload.channel !== thread.channel;
 
+    // First REAL inbound reply on an archived campaign thread → move to OPEN so
+    // it surfaces in Inbox. Only flip on messages with actual body content to
+    // avoid events like email_opened or CONNECTION_ACCEPTED (which arrive as
+    // INBOUND but carry no text) from prematurely unarchiving a thread.
+    const hasReplyContent = !!(payload.bodyText?.trim() || payload.messageText?.trim());
+    const shouldUnarchive =
+      payload.direction === "INBOUND" && thread.status === "ARCHIVED" && hasReplyContent;
+
     await tx.thread.update({
       where: { id: thread.id },
       data: {
         ...(shouldUpdateSnippet ? { snippet } : {}),
         ...(isNewerThanLast ? { lastMessageAt: msgTime } : {}),
         ...(shouldUpdateChannel ? { channel: payload.channel } : {}),
+        ...(shouldUnarchive ? { status: "OPEN" } : {}),
         messageCount: { increment: 1 },
         isUnread: payload.direction === "INBOUND" ? true : undefined,
       },
