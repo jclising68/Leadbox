@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const { thread, message } = await resolveThread(
+    const { thread, message, prospect } = await resolveThread(
       workspaceId,
       integration.id,
       normalized

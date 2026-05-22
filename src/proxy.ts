@@ -2,15 +2,9 @@ import { NextResponse } from "next/server";
 import NextAuth from "next-auth";
 import { authConfig } from "@/lib/auth.config";
 
-// Edge-safe NextAuth instance for the proxy/middleware layer. This pulls
-// the cookie-decoding logic out of next-auth itself (which knows the
-// correct cookie name + salt for v5, including the `__Secure-` prefix in
-// production) instead of relying on `getToken()`, which has edge-runtime
-// quirks around chunked / secure cookies that caused post-login requests
-// to be treated as unauthenticated and bounced back to /login.
 const { auth } = NextAuth(authConfig);
 
-export default auth((req) => {
+export const proxy = auth((req) => {
   const { pathname } = req.nextUrl;
 
   // Auth API, webhooks, cron, and MCP routes bypass the session check.
@@ -23,9 +17,6 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
-  // Public auth pages — anyone can reach these without being bounced to
-  // /login by the guard below. Forgot/reset must be here so users who
-  // can't log in can still recover.
   const isAuthPage =
     pathname.startsWith("/login") ||
     pathname.startsWith("/register") ||
@@ -34,17 +25,14 @@ export default auth((req) => {
 
   const isAuth = !!req.auth;
 
-  // Already-logged-in users shouldn't see auth pages.
   if (isAuthPage && isAuth) {
     return NextResponse.redirect(new URL("/inbox", req.url));
   }
 
-  // Root → inbox for logged-in users.
   if (pathname === "/" && isAuth) {
     return NextResponse.redirect(new URL("/inbox", req.url));
   }
 
-  // Protect dashboard routes — anonymous users go to /login.
   if (!isAuth && !isAuthPage) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
@@ -54,10 +42,6 @@ export default auth((req) => {
 
 export const config = {
   matcher: [
-    // Skip Next internals, webhooks/cron APIs, and any request for a static
-    // asset in /public (anything with a file extension like .png/.svg/.ico).
-    // Without the extension carve-out, the auth guard would 307 image
-    // requests to /login and break logos / favicons for signed-out users.
     "/((?!_next/static|_next/image|api/webhooks|api/cron|api/mcp|.*\\.[\\w]+$).*)",
   ],
 };

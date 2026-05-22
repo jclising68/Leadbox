@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "skipped", reason: "no_email" });
     }
 
-    const { thread, message } = await resolveThread(
+    const { thread, message, prospect } = await resolveThread(
       workspaceId,
       integration.id,
       normalized
