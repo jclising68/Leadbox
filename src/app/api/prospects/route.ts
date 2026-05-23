@@ -262,10 +262,11 @@ export async function GET(req: NextRequest) {
           },
           messages: {
             take: 1,
-            // INBOUND sorts before OUTBOUND in the Direction enum declaration,
-            // so replies always take priority over sent emails for the provider
-            // icon — prevents a Lemlist bulk-send from overwriting an Instantly
-            // reply's icon just because it was synced more recently.
+            // Only consider messages that came from a provider integration —
+            // user-composed replies have no integrationId and would mask the
+            // provider icon (e.g. a LeadBox reply to a Lemlist lead shows "-").
+            // INBOUND sorts before OUTBOUND so lead replies take priority.
+            where: { integrationId: { not: null } },
             orderBy: [{ direction: "asc" }, { receivedAt: "desc" }],
             select: {
               campaignName: true,
