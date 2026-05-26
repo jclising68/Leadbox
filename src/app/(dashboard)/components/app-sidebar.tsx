@@ -13,6 +13,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Check,
+  Kanban,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -42,6 +43,7 @@ const mainNavItems = [
   { label: "Inbox", path: "/inbox", icon: Inbox, matchEnd: "/inbox" },
   { label: "Outbound Inbox", path: "/outbound-inbox", icon: MailOpen, matchEnd: "/outbound-inbox" },
   { label: "Leads", path: "/leads", icon: Briefcase, matchEnd: "/leads" },
+  { label: "Pipeline", path: "/pipeline", icon: Kanban, matchEnd: "/pipeline" },
   { label: "KPI", path: "/kpi", icon: BarChart2, matchEnd: "/kpi" },
 ];
 

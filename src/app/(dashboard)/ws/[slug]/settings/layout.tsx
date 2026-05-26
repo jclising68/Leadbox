@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Plug, Users, Tag, Webhook, Brain, Building, Key, Mail } from "lucide-react";
+import { Plug, Users, Tag, Webhook, Brain, Building, Key, Mail, Kanban } from "lucide-react";
 
 const accountSettings = [
   { label: "Personal details", path: "/settings/personal", icon: Users },
@@ -15,6 +15,7 @@ const workspaceSettings = [
   { label: "Webhooks", path: "/settings/webhooks", icon: Webhook },
   { label: "Integrations", path: "/settings/integrations", icon: Plug },
   { label: "Labels", path: "/settings/labels", icon: Tag },
+  { label: "Pipeline", path: "/settings/pipeline", icon: Kanban },
   { label: "AI Integration", path: "/settings/ai-integration", icon: Brain },
   { label: "API Keys", path: "/settings/api-keys", icon: Key },
   { label: "Channels", path: "/settings/channels", icon: Mail },

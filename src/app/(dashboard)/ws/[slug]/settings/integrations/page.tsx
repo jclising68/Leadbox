@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
+import { useWorkspaces } from "@/hooks/use-workspace";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,12 +20,12 @@ import { toast } from "sonner";
 import { Copy, Check, Loader2, Plug, Trash2, RefreshCw, Database, AlertTriangle, Power } from "lucide-react";
 import Image from "next/image";
 
-type ProviderId = "INSTANTLY" | "HEYREACH" | "LEMLIST" | "BLITZ" | "APOLLO";
+type ProviderId = "INSTANTLY" | "HEYREACH" | "LEMLIST" | "BLITZ" | "APOLLO" | "SLACK";
 
 const PROVIDERS: {
   id: ProviderId;
   name: string;
-  kind: "Inbound sync" | "Enrichment";
+  kind: "Inbound sync" | "Enrichment" | "Notifications";
   description: string;
   logo: string;
 }[] = [
@@ -63,6 +64,13 @@ const PROVIDERS: {
     description: "Fallback — global phones + richer firmographics.",
     logo: "/branding/apollo.png",
   },
+  {
+    id: "SLACK",
+    name: "Slack",
+    kind: "Notifications",
+    description: "Send follow-up reminders to a Slack channel via Incoming Webhook.",
+    logo: "/branding/slack.svg",
+  },
 ];
 
 function headers(wId: string) {
@@ -72,17 +80,42 @@ function headers(wId: string) {
 export default function IntegrationsPage() {
   const workspaceId = useCurrentWorkspaceId();
   const queryClient = useQueryClient();
+  const { data: workspaces } = useWorkspaces();
   const [open, setOpen] = useState(false);
   const [provider, setProvider] = useState<ProviderId>("INSTANTLY");
   const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [slackWebhookUrl, setSlackWebhookUrl] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"available" | "connected" | null>(null);
+
+  const currentWorkspace = workspaces?.find(
+    (w: { id: string; slackWebhookUrl?: string | null }) => w.id === workspaceId
+  );
+  const savedSlackUrl = currentWorkspace?.slackWebhookUrl ?? null;
+
+  const saveSlackMutation = useMutation({
+    mutationFn: async (url: string | null) => {
+      const res = await fetch(`/api/workspaces/${workspaceId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slackWebhookUrl: url }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      setOpen(false);
+      toast.success(slackWebhookUrl ? "Slack connected!" : "Slack disconnected");
+    },
+    onError: () => toast.error("Failed to save Slack webhook"),
+  });
 
   function openAddDialog(p: ProviderId) {
     setProvider(p);
     setName("");
     setApiKey("");
+    if (p === "SLACK") setSlackWebhookUrl(savedSlackUrl ?? "");
     setOpen(true);
   }
 
@@ -301,8 +334,9 @@ export default function IntegrationsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {PROVIDERS.map((p) => {
               const list = (integrations ?? []) as { provider: string }[];
-              const count = list.filter((i) => i.provider === p.id).length;
+              const count = p.id === "SLACK" ? (savedSlackUrl ? 1 : 0) : list.filter((i) => i.provider === p.id).length;
               const isEnrichment = p.kind === "Enrichment";
+              const isNotification = p.kind === "Notifications";
               return (
                 <button
                   key={p.id}
@@ -324,13 +358,21 @@ export default function IntegrationsPage() {
                   </div>
                   <Badge
                     variant="outline"
-                    className={`text-[10px] mb-2 ${isEnrichment ? "border-purple-500/40 text-purple-700 dark:text-purple-400" : "border-blue-500/40 text-blue-700 dark:text-blue-400"}`}
+                    className={`text-[10px] mb-2 ${
+                      isEnrichment
+                        ? "border-purple-500/40 text-purple-700 dark:text-purple-400"
+                        : isNotification
+                        ? "border-green-500/40 text-green-700 dark:text-green-400"
+                        : "border-blue-500/40 text-blue-700 dark:text-blue-400"
+                    }`}
                   >
                     {p.kind}
                   </Badge>
                   <p className="text-xs text-muted-foreground mb-3 leading-snug">{p.description}</p>
                   <div className="mt-auto text-[11px] font-medium text-primary group-hover:underline">
-                    {count === 0 ? "+ Add" : "+ Add another"}
+                    {p.id === "SLACK"
+                      ? (savedSlackUrl ? "Edit webhook" : "+ Connect")
+                      : count === 0 ? "+ Add" : "+ Add another"}
                   </div>
                 </button>
               );
@@ -346,43 +388,82 @@ export default function IntegrationsPage() {
               <div className="flex h-6 w-6 items-center justify-center rounded bg-white border overflow-hidden">
                 <Image src={selectedProviderMeta.logo} alt={selectedProviderMeta.name} width={20} height={20} className="object-contain" />
               </div>
-              Add {selectedProviderMeta.name}
+              {provider === "SLACK" ? (savedSlackUrl ? "Edit Slack Webhook" : "Connect Slack") : `Add ${selectedProviderMeta.name}`}
             </DialogTitle>
             <DialogDescription>
-              {selectedProviderMeta.kind === "Inbound sync"
+              {provider === "SLACK"
+                ? "Paste your Slack Incoming Webhook URL. Follow-up reminders will be posted to the linked channel every 5 minutes."
+                : selectedProviderMeta.kind === "Inbound sync"
                 ? "Syncs replies and conversations into your inbox."
                 : "Used to enrich missing lead data on demand from the Leads page."}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Name</Label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., Main Account"
-              />
+
+          {provider === "SLACK" ? (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Incoming Webhook URL</Label>
+                <Input
+                  value={slackWebhookUrl}
+                  onChange={(e) => setSlackWebhookUrl(e.target.value)}
+                  placeholder="https://hooks.slack.com/services/..."
+                  className="font-mono text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Create one at <span className="font-mono">api.slack.com/apps</span> → Your App → Incoming Webhooks.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1"
+                  onClick={() => saveSlackMutation.mutate(slackWebhookUrl || null)}
+                  disabled={saveSlackMutation.isPending}
+                >
+                  {saveSlackMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                  Save
+                </Button>
+                {savedSlackUrl && (
+                  <Button
+                    variant="outline"
+                    onClick={() => saveSlackMutation.mutate(null)}
+                    disabled={saveSlackMutation.isPending}
+                  >
+                    Disconnect
+                  </Button>
+                )}
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>API Key</Label>
-              <Input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Your API key"
-              />
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Name</Label>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g., Main Account"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>API Key</Label>
+                <Input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Your API key"
+                />
+              </div>
+              <Button
+                className="w-full"
+                onClick={() => createMutation.mutate()}
+                disabled={!name || !apiKey || createMutation.isPending}
+              >
+                {createMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : null}
+                Add {selectedProviderMeta.name}
+              </Button>
             </div>
-            <Button
-              className="w-full"
-              onClick={() => createMutation.mutate()}
-              disabled={!name || !apiKey || createMutation.isPending}
-            >
-              {createMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : null}
-              Add {selectedProviderMeta.name}
-            </Button>
-          </div>
+          )}
         </DialogContent>
       </Dialog>
 

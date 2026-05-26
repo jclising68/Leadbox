@@ -308,9 +308,11 @@ export async function syncLemlist(
     `[lemlist-sync] ${newReplied.length} new replies, ${newSent.length} new sent to process`
   );
 
-  // Fetch full HTML body for each unique contactId that has new replies
+  // Fetch full HTML body for all contacts with new activity (replies + sent)
   const uniqueContactIds = [
-    ...new Set(newReplied.map((a) => a.contactId).filter(Boolean) as string[]),
+    ...new Set(
+      [...newReplied, ...newSent].map((a) => a.contactId).filter(Boolean) as string[]
+    ),
   ];
 
   const bodyMap = new Map<string, string>(); // activityId → full HTML body
@@ -318,7 +320,7 @@ export async function syncLemlist(
   if (uniqueContactIds.length > 0) {
     await updateSyncProgress(integrationId, {
       stage: "fetching_pages",
-      message: `Fetching full reply bodies (${uniqueContactIds.length} contacts)`,
+      message: `Fetching full message bodies (${uniqueContactIds.length} contacts)`,
       percent: 30,
     });
 
@@ -371,7 +373,7 @@ export async function syncLemlist(
     }
 
     try {
-      const bodyFromMcp = direction === "INBOUND" ? bodyMap.get(activity._id) : undefined;
+      const bodyFromMcp = bodyMap.get(activity._id);
       const payload = activityToPayload(activity, bodyFromMcp, campaignMap, direction);
       await resolveThread(workspaceId, integrationId, payload);
       synced++;

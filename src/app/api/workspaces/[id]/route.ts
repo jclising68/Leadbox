@@ -31,6 +31,7 @@ export async function PATCH(
     aiReplyInstructions?: string | null;
     aiLabelProvider?: "openai" | "claude";
     kpiEmbedToken?: string | null;
+    slackWebhookUrl?: string | null;
   };
 
   const data: {
@@ -43,6 +44,7 @@ export async function PATCH(
     aiReplyInstructions?: string | null;
     aiLabelProvider?: string | null;
     kpiEmbedToken?: string | null;
+    slackWebhookUrl?: string | null;
   } = {};
 
   if (body.name !== undefined) {
@@ -82,6 +84,10 @@ export async function PATCH(
 
   if (body.kpiEmbedToken !== undefined) {
     data.kpiEmbedToken = body.kpiEmbedToken || null;
+  }
+
+  if (body.slackWebhookUrl !== undefined) {
+    data.slackWebhookUrl = body.slackWebhookUrl || null;
   }
 
   if (Object.keys(data).length === 0) {

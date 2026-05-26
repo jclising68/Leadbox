@@ -6,6 +6,7 @@ import { useInboxStore } from "@/stores/inbox-store";
 import { LabelTabs } from "./components/label-tabs";
 import { ThreadList } from "./components/thread-list";
 import { ThreadDetail } from "./components/thread-detail";
+import { FollowUpReminder } from "@/components/follow-up-reminder";
 
 export default function InboxPage() {
   const searchParams = useSearchParams();
@@ -40,6 +41,7 @@ export default function InboxPage() {
 
   return (
     <div className="flex flex-col h-full">
+      <FollowUpReminder />
       {/* Label tabs at top - like Master Inbox */}
       <LabelTabs />
 

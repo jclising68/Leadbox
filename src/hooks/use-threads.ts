@@ -176,6 +176,35 @@ export function useRemoveLabel() {
   });
 }
 
+export function useSetFollowUp() {
+  const queryClient = useQueryClient();
+  const workspaceId = useCurrentWorkspaceId();
+
+  return useMutation({
+    mutationFn: async ({
+      threadId,
+      followUpAt,
+    }: {
+      threadId: string;
+      followUpAt: string | null;
+    }) => {
+      const res = await fetch(`/api/threads/${threadId}`, {
+        method: "PATCH",
+        headers: buildHeaders(workspaceId!),
+        body: JSON.stringify({ followUpAt }),
+      });
+      if (!res.ok) throw new Error("Failed to set follow-up");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["threads"] });
+      queryClient.invalidateQueries({ queryKey: ["thread"] });
+      queryClient.invalidateQueries({ queryKey: ["labels"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+}
+
 export type ReplyAttachment = { name: string; url: string; type: string };
 
 export function useSendReply() {

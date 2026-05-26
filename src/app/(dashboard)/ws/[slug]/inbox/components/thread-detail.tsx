@@ -1,6 +1,6 @@
 "use client";
 
-import { useThread, useUpdateThread, useAddLabel, useRemoveLabel, useSendReply, type ReplyAttachment } from "@/hooks/use-threads";
+import { useThread, useUpdateThread, useAddLabel, useRemoveLabel, useSendReply, useSetFollowUp, type ReplyAttachment } from "@/hooks/use-threads";
 import { useLabels } from "@/hooks/use-labels";
 import { useInboxStore } from "@/stores/inbox-store";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,6 +14,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label as UiLabel } from "@/components/ui/label";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 import {
@@ -43,6 +55,8 @@ import {
   MessageSquare,
   Send,
   Paperclip,
+  BellRing,
+  Kanban,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -100,12 +114,23 @@ export function ThreadDetail() {
   const addLabel = useAddLabel();
   const removeLabel = useRemoveLabel();
   const sendReply = useSendReply();
+  const setFollowUp = useSetFollowUp();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const attachFileRef = useRef<HTMLInputElement>(null);
   const [replyText, setReplyText] = useState("");
   const [draftApplied, setDraftApplied] = useState(false);
   const [attachments, setAttachments] = useState<ReplyAttachment[]>([]);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [pipelineOpen, setPipelineOpen] = useState(false);
+  const [pipelineId, setPipelineId] = useState("");
+  const [pipelineStageId, setPipelineStageId] = useState("");
+  const [pipelineTitle, setPipelineTitle] = useState("");
+  const [pipelineNotes, setPipelineNotes] = useState("");
+  const [pipelineValue, setPipelineValue] = useState("");
+  const [pipelineSaving, setPipelineSaving] = useState(false);
+  const [followUpDrafting, setFollowUpDrafting] = useState(false);
 
   // Fetch AI draft for the current thread
   const { data: aiDraft } = useQuery({
@@ -124,6 +149,23 @@ export function ThreadDetail() {
       return query.state.data?.status === "PENDING" ? 3000 : false;
     },
     staleTime: 0,
+  });
+
+  // Pipelines for the "Add to Pipeline" dialog
+  type PipelineStageShape = { id: string; name: string; color: string; sortOrder: number };
+  type PipelineShape = { id: string; name: string; stages: PipelineStageShape[] };
+  const { data: pipelines = [] } = useQuery<PipelineShape[]>({
+    queryKey: ["pipelines", workspaceId],
+    queryFn: async () => {
+      if (!workspaceId) return [];
+      const res = await fetch("/api/pipeline", {
+        headers: { "x-workspace-id": workspaceId },
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!workspaceId,
+    staleTime: 30000,
   });
 
   // Pre-fill composer when a READY draft arrives and user hasn't typed anything
@@ -263,6 +305,85 @@ export function ThreadDetail() {
               <Clock className="h-3.5 w-3.5" />
             </Button>
 
+            {/* Follow-up date picker */}
+            <Popover open={followUpOpen} onOpenChange={(o) => {
+              setFollowUpOpen(o);
+              if (o && thread.followUpAt) {
+                // Pre-fill with existing follow-up date in local datetime-local format
+                const d = new Date(thread.followUpAt);
+                const pad = (n: number) => String(n).padStart(2, "0");
+                setFollowUpDate(
+                  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+                );
+              } else if (o) {
+                setFollowUpDate("");
+              }
+            }}>
+              <PopoverTrigger
+                className={cn(
+                  "inline-flex items-center justify-center h-7 w-7 rounded-md hover:bg-muted transition-colors",
+                  thread.followUpAt ? "text-amber-500" : "text-muted-foreground"
+                )}
+                title={thread.followUpAt
+                  ? `Follow-up set: ${new Date(thread.followUpAt).toLocaleDateString()}`
+                  : "Set follow-up reminder"}
+              >
+                <BellRing className="h-3.5 w-3.5" />
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 p-4">
+                <p className="text-sm font-medium mb-3">Set follow-up reminder</p>
+                <input
+                  type="datetime-local"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                  value={followUpDate}
+                  onChange={(e) => setFollowUpDate(e.target.value)}
+                />
+                <div className="flex items-center gap-2 mt-3">
+                  <Button
+                    size="sm"
+                    className="flex-1"
+                    disabled={!followUpDate || setFollowUp.isPending}
+                    onClick={() => {
+                      setFollowUp.mutate(
+                        { threadId: thread.id, followUpAt: new Date(followUpDate).toISOString() },
+                        {
+                          onSuccess: () => {
+                            toast.success("Follow-up reminder set");
+                            setFollowUpOpen(false);
+                          },
+                          onError: () => toast.error("Failed to set follow-up"),
+                        }
+                      );
+                    }}
+                  >
+                    {setFollowUp.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+                  </Button>
+                  {thread.followUpAt && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      disabled={setFollowUp.isPending}
+                      onClick={() => {
+                        setFollowUp.mutate(
+                          { threadId: thread.id, followUpAt: null },
+                          {
+                            onSuccess: () => {
+                              toast.success("Follow-up cleared");
+                              setFollowUpOpen(false);
+                            },
+                            onError: () => toast.error("Failed to clear follow-up"),
+                          }
+                        );
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+
             {/* Context-aware action buttons */}
             {thread.status === "OPEN" && (
               <>
@@ -359,6 +480,26 @@ export function ThreadDetail() {
                 </Button>
               </>
             )}
+
+            {/* Add to Pipeline */}
+            <button
+              title="Add to pipeline"
+              className="inline-flex items-center justify-center h-7 w-7 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => {
+                const name = prospectName
+                  ? prospectName
+                  : thread.prospect.email ?? "Deal";
+                setPipelineTitle(name);
+                setPipelineNotes("");
+                setPipelineValue("");
+                const firstPipeline = pipelines[0];
+                setPipelineId(firstPipeline?.id ?? "");
+                setPipelineStageId(firstPipeline?.stages[0]?.id ?? "");
+                setPipelineOpen(true);
+              }}
+            >
+              <Kanban className="h-3.5 w-3.5" />
+            </button>
 
             <DropdownMenu>
               <DropdownMenuTrigger className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs hover:bg-muted border">
@@ -591,6 +732,44 @@ export function ThreadDetail() {
             </div>
           )}
 
+          {/* Follow Up draft button — shown when thread has a follow-up date set */}
+          {thread?.followUpAt && (
+            <div className="flex items-center gap-1.5 mb-2">
+              <button
+                type="button"
+                disabled={followUpDrafting || aiDraft?.status === "PENDING"}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400 ring-1 ring-inset ring-amber-500/30 hover:bg-amber-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={async () => {
+                  if (!workspaceId || !selectedThreadId) return;
+                  setFollowUpDrafting(true);
+                  setReplyText("");
+                  setDraftApplied(false);
+                  try {
+                    const res = await fetch(`/api/threads/${selectedThreadId}/draft`, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        "x-workspace-id": workspaceId,
+                      },
+                      body: JSON.stringify({ intent: "follow_up" }),
+                    });
+                    if (!res.ok) {
+                      const err = await res.json().catch(() => ({}));
+                      toast.error(err.error || "Failed to generate follow-up draft");
+                      return;
+                    }
+                    queryClient.invalidateQueries({ queryKey: ["ai-draft", selectedThreadId] });
+                  } finally {
+                    setFollowUpDrafting(false);
+                  }
+                }}
+              >
+                {followUpDrafting ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <BellRing className="h-2.5 w-2.5" />}
+                Draft Follow Up
+              </button>
+            </div>
+          )}
+
           {/* Attachment chips */}
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-2">
@@ -694,6 +873,130 @@ export function ThreadDetail() {
           </div>
         </div>
       </div>
+
+      {/* Add to Pipeline Dialog */}
+      <Dialog open={pipelineOpen} onOpenChange={(o) => !o && setPipelineOpen(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Add to Pipeline</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            <div>
+              <UiLabel className="text-xs mb-1.5 block">Title *</UiLabel>
+              <input
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                value={pipelineTitle}
+                onChange={(e) => setPipelineTitle(e.target.value)}
+                placeholder="Deal title"
+                autoFocus
+              />
+            </div>
+            {pipelines.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No pipelines yet. Create one from the Pipeline page first.
+              </p>
+            ) : (
+              <>
+                <div>
+                  <UiLabel className="text-xs mb-1.5 block">Pipeline</UiLabel>
+                  <select
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                    value={pipelineId}
+                    onChange={(e) => {
+                      const pid = e.target.value;
+                      setPipelineId(pid);
+                      const pl = pipelines.find((p) => p.id === pid);
+                      setPipelineStageId(pl?.stages[0]?.id ?? "");
+                    }}
+                  >
+                    {pipelines.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <UiLabel className="text-xs mb-1.5 block">Stage</UiLabel>
+                  {(() => {
+                    const activePipeline = pipelines.find((p) => p.id === pipelineId);
+                    const stages = activePipeline?.stages ?? [];
+                    return stages.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No stages in this pipeline.</p>
+                    ) : (
+                      <select
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                        value={pipelineStageId}
+                        onChange={(e) => setPipelineStageId(e.target.value)}
+                      >
+                        {stages.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    );
+                  })()}
+                </div>
+              </>
+            )}
+            <div>
+              <UiLabel className="text-xs mb-1.5 block">Value (USD)</UiLabel>
+              <input
+                type="number"
+                min={0}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40"
+                value={pipelineValue}
+                onChange={(e) => setPipelineValue(e.target.value)}
+                placeholder="e.g. 5000"
+              />
+            </div>
+            <div>
+              <UiLabel className="text-xs mb-1.5 block">Notes</UiLabel>
+              <textarea
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[60px] resize-none focus:outline-none focus:ring-2 focus:ring-ring/40"
+                value={pipelineNotes}
+                onChange={(e) => setPipelineNotes(e.target.value)}
+                placeholder="Optional notes..."
+              />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button variant="ghost" onClick={() => setPipelineOpen(false)} className="flex-1">
+                Cancel
+              </Button>
+              <Button
+                className="flex-1"
+                disabled={!pipelineTitle.trim() || !pipelineId || !pipelineStageId || pipelineSaving}
+                onClick={async () => {
+                  if (!workspaceId) return;
+                  setPipelineSaving(true);
+                  try {
+                    const res = await fetch("/api/pipeline/deals", {
+                      method: "POST",
+                      headers: { "x-workspace-id": workspaceId, "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        pipelineId,
+                        stageId: pipelineStageId,
+                        title: pipelineTitle.trim(),
+                        notes: pipelineNotes || null,
+                        value: pipelineValue ? parseFloat(pipelineValue) : null,
+                        prospectId: thread.prospect.id,
+                        threadId: thread.id,
+                      }),
+                    });
+                    if (!res.ok) throw new Error("Failed to add to pipeline");
+                    toast.success("Added to pipeline");
+                    setPipelineOpen(false);
+                    queryClient.invalidateQueries({ queryKey: ["pipeline-deals"] });
+                  } catch {
+                    toast.error("Failed to add to pipeline");
+                  } finally {
+                    setPipelineSaving(false);
+                  }
+                }}
+              >
+                {pipelineSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Add to pipeline"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Prospect details panel */}
       <div className="w-72 border-l border-border bg-card flex flex-col h-full overflow-hidden shrink-0">
@@ -810,6 +1113,31 @@ export function ThreadDetail() {
                   <h5 className="text-xs font-semibold uppercase text-muted-foreground">Notes</h5>
                   <DetailRow icon={FileText} label="Notes" value={thread.prospect.notes} />
                   <DetailRow icon={MessageSquare} label="Feedback" value={thread.prospect.feedback} />
+                </div>
+              </>
+            )}
+
+            {/* Pipeline */}
+            {((thread.prospect as { pipelineDeals?: { id: string; pipeline: { name: string }; stage: { name: string; color: string } }[] }).pipelineDeals?.length ?? 0) > 0 && (
+              <>
+                <Separator className="my-3" />
+                <div className="space-y-2.5">
+                  <h5 className="text-xs font-semibold uppercase text-muted-foreground">Pipeline</h5>
+                  {(thread.prospect as { pipelineDeals: { id: string; pipeline: { name: string }; stage: { name: string; color: string } }[] }).pipelineDeals.map((deal) => (
+                    <div key={deal.id} className="flex items-center gap-2">
+                      <Kanban className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">{deal.pipeline.name}</p>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="inline-block h-2 w-2 rounded-full shrink-0"
+                            style={{ backgroundColor: deal.stage.color }}
+                          />
+                          <p className="text-sm truncate">{deal.stage.name}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </>
             )}

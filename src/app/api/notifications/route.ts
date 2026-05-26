@@ -5,7 +5,7 @@ import { workspaceJson } from "@/lib/api-response";
 
 type NotificationItem = {
   id: string;
-  type: "reply";
+  type: "reply" | "followUp";
   threadId: string;
   title: string;
   subtitle: string;
@@ -75,8 +75,43 @@ export async function GET(req: NextRequest) {
     };
   });
 
+  // Follow-up reminders: threads with a due followUpAt
+  const dueFollowUps = await prisma.thread.findMany({
+    where: {
+      workspaceId: workspaceId!,
+      followUpAt: { not: null, lte: new Date() },
+      status: "OPEN",
+    },
+    select: {
+      id: true,
+      followUpAt: true,
+      isUnread: true,
+      prospect: {
+        select: { firstName: true, lastName: true, email: true },
+      },
+    },
+    orderBy: { followUpAt: "asc" },
+    take: 20,
+  });
+
+  const followUpItems: NotificationItem[] = dueFollowUps.map((t) => {
+    const name =
+      [t.prospect.firstName, t.prospect.lastName].filter(Boolean).join(" ").trim() ||
+      t.prospect.email ||
+      "Unknown";
+    return {
+      id: `followup:${t.id}`,
+      type: "followUp",
+      threadId: t.id,
+      title: `Follow-up due: ${name}`,
+      subtitle: `Scheduled for ${new Date(t.followUpAt!).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`,
+      at: t.followUpAt!.toISOString(),
+      isUnread: t.isUnread,
+    };
+  });
+
   return workspaceJson({
-    items,
+    items: [...followUpItems, ...items],
     generatedAt: new Date().toISOString(),
   });
 }

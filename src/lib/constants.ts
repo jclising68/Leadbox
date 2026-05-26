@@ -8,6 +8,7 @@ export const DEFAULT_LABELS = [
   { name: "Maybe Future", color: "#EAB308", isSystem: true, sortOrder: 6 },
   { name: "Auto Reply", color: "#EC4899", isSystem: true, sortOrder: 7 },
   { name: "Neutral", color: "#8B5CF6", isSystem: true, sortOrder: 8 },
+  { name: "Follow Up", color: "#F59E0B", isSystem: true, sortOrder: 9 },
 ] as const;
 
 export const CLASSIFICATION_PROMPT = `You are a sales email/message classifier. Classify the prospect's reply into exactly one category.

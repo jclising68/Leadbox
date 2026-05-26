@@ -17,7 +17,7 @@ function createWorkspaceQueryClient() {
       queries: {
         staleTime: 5000,
         gcTime: 300000,
-        refetchOnWindowFocus: true,
+        refetchOnWindowFocus: false,
       },
     },
   });

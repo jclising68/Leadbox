@@ -5,7 +5,8 @@ import { decrypt } from "@/lib/crypto";
 
 export async function generateReplyDraft(
   workspaceId: string,
-  threadId: string
+  threadId: string,
+  intent?: string
 ): Promise<void> {
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
@@ -86,10 +87,13 @@ export async function generateReplyDraft(
       campaignName ? `Campaign: ${campaignName}` : null,
     ].filter(Boolean);
 
+    const isFollowUp = intent === "follow_up";
     const systemPrompt = [
       workspace.aiReplyInstructions ||
         "You are a professional sales representative drafting email replies.",
-      "Draft a reply to the lead's most recent message. Be natural, concise, and directly address what they said.",
+      isFollowUp
+        ? "This is a follow-up message to re-engage a lead who has not responded recently. Draft a natural, concise follow-up that references the previous conversation and re-opens the dialogue. Do not sound pushy."
+        : "Draft a reply to the lead's most recent message. Be natural, concise, and directly address what they said.",
       "Return only the reply body — no subject line, no signature placeholder, no meta-commentary.",
     ].join("\n\n");
 

@@ -15,7 +15,16 @@ export async function GET(
   const thread = await prisma.thread.findFirst({
     where: { id: threadId, workspaceId: workspaceId! },
     include: {
-      prospect: true,
+      prospect: {
+        include: {
+          pipelineDeals: {
+            include: {
+              stage: { select: { id: true, name: true, color: true } },
+              pipeline: { select: { id: true, name: true } },
+            },
+          },
+        },
+      },
       threadLabels: { include: { label: true } },
       messages: {
         orderBy: { sentAt: "asc" },
@@ -66,6 +75,22 @@ export async function PATCH(
     data.assignedTo = body.assignedTo;
   }
 
+  // followUpAt is an ISO string, null to clear, or undefined to skip
+  let applyFollowUpLabel = false;
+  if (body.followUpAt !== undefined) {
+    if (body.followUpAt === null) {
+      data.followUpAt = null;
+    } else {
+      const date = new Date(body.followUpAt);
+      if (isNaN(date.getTime())) {
+        return NextResponse.json({ error: "Invalid followUpAt date" }, { status: 400 });
+      }
+      data.followUpAt = date;
+      data.followUpSlackSentAt = null;
+      applyFollowUpLabel = true;
+    }
+  }
+
   const thread = await prisma.thread.updateMany({
     where: { id: threadId, workspaceId: workspaceId! },
     data,
@@ -73,6 +98,21 @@ export async function PATCH(
 
   if (thread.count === 0) {
     return NextResponse.json({ error: "Thread not found" }, { status: 404 });
+  }
+
+  // Auto-apply the "Follow Up" system label when a follow-up date is set
+  if (applyFollowUpLabel) {
+    const followUpLabel = await prisma.label.findFirst({
+      where: { workspaceId: workspaceId!, name: "Follow Up" },
+      select: { id: true },
+    });
+    if (followUpLabel) {
+      await prisma.threadLabel.upsert({
+        where: { threadId_labelId: { threadId, labelId: followUpLabel.id } },
+        create: { threadId, labelId: followUpLabel.id, source: "MANUAL" },
+        update: {},
+      });
+    }
   }
 
   return NextResponse.json({ success: true });
