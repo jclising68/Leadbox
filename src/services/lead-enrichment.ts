@@ -279,6 +279,35 @@ function buildUpdateData(
   return updateData;
 }
 
+/**
+ * One-time-per-run cleanup: threads with multiple WEBHOOK labels are a data
+ * bug from the old multi-label enrichment loop. Keep the most recently applied
+ * one, delete the rest. Runs at the start of every enrichment cycle so
+ * existing bad data self-heals on the next scheduled run.
+ */
+async function cleanupMultiWebhookLabels(workspaceId: string): Promise<void> {
+  const labels = await prisma.threadLabel.findMany({
+    where: { source: "WEBHOOK", thread: { workspaceId } },
+    select: { id: true, threadId: true },
+    orderBy: { appliedAt: "desc" },
+  });
+
+  const seen = new Set<string>();
+  const toDelete: string[] = [];
+  for (const l of labels) {
+    if (seen.has(l.threadId)) {
+      toDelete.push(l.id);
+    } else {
+      seen.add(l.threadId);
+    }
+  }
+
+  if (toDelete.length > 0) {
+    await prisma.threadLabel.deleteMany({ where: { id: { in: toDelete } } });
+    console.log(`[enrich] Cleaned up ${toDelete.length} duplicate WEBHOOK labels`);
+  }
+}
+
 export async function enrichFromInstantly(
   integrationId: string,
   /** Total milliseconds this enrichment run is allowed to use. Default 120s. */
@@ -296,6 +325,9 @@ export async function enrichFromInstantly(
 
   const apiKey = decrypt(integration.apiKeyEncrypted, integration.apiKeyIv, integration.apiKeyTag);
   const workspaceId = integration.workspaceId;
+
+  // Heal any threads that accumulated multiple WEBHOOK labels from the old loop
+  await cleanupMultiWebhookLabels(workspaceId);
 
   // Workspace setting: when autoCreateLabels=false, skip labels that don't
   // already exist instead of auto-creating them on the fly. Lets the user
@@ -511,13 +543,12 @@ export async function enrichFromInstantly(
           enriched++;
         } else {
           // ---- IMPORT new lead ----
-          // Strict gate: only import leads that have actually replied OR have
-          // been tagged in Instantly. Everything else (in-sequence, finished,
-          // bounced, etc.) is noise until they engage.
+          // Strict gate: only import leads that have actually replied.
+          // Tags alone are not enough — a tagged lead with 0 replies has no
+          // messages to show in the inbox and creates misleading label state.
           const hasReply = (lead.email_reply_count ?? 0) > 0;
-          const hasTag = !!interestLabel || customTagLabels.length > 0;
-          if (!hasReply && !hasTag) {
-            continue; // No reply and no tag — skip import
+          if (!hasReply) {
+            continue; // No reply — skip import
           }
 
           try {
@@ -558,52 +589,49 @@ export async function enrichFromInstantly(
           }
         }
 
-        // Apply labels (interest status + custom tags) to thread.
-        // Clear stale WEBHOOK labels first so contradictory labels from
-        // previous enrichment runs don't accumulate (e.g. Interested +
-        // Not Interested simultaneously). AUTO_AI labels from the classifier
-        // are left alone — they are managed by applyAutoLabel separately.
+        // Apply a single label to the thread. interestLabel (lt_interest_status)
+        // is authoritative — it takes priority over custom tags. If neither is
+        // set, skip. Multiple simultaneous WEBHOOK labels cause contradictory
+        // state (e.g. Interested + Wrong Person) so we enforce exactly one.
         if (threadId) {
-          const labelsToApply = new Map<string, string>();
-          if (interestLabel) {
-            labelsToApply.set(interestLabel.toLowerCase(), interestLabel);
-          }
-          for (const tagName of customTagLabels) {
-            labelsToApply.set(tagName.toLowerCase(), tagName);
-          }
-
-          if (labelsToApply.size > 0) {
-            await prisma.threadLabel.deleteMany({
-              where: { threadId, source: "WEBHOOK" },
-            });
-          }
-
-          for (const [lowerKey, labelName] of labelsToApply) {
+          const singleLabelName = interestLabel ?? customTagLabels[0];
+          if (singleLabelName) {
+            const lowerKey = singleLabelName.toLowerCase();
             let label = labelByName.get(lowerKey);
             if (!label) {
               if (!autoCreateLabels) {
-                // Workspace has opted out of auto-label creation. Try a
-                // findUnique so a newly-manually-created label still gets
-                // picked up, but never create one here.
                 const found = await prisma.label.findUnique({
-                  where: { workspaceId_name: { workspaceId, name: labelName } },
+                  where: { workspaceId_name: { workspaceId, name: singleLabelName } },
                   select: { id: true, name: true },
                 });
-                if (!found) continue;
-                label = found;
+                if (found) {
+                  label = found;
+                  labelByName.set(lowerKey, label);
+                }
               } else {
                 label = await prisma.label.upsert({
-                  where: { workspaceId_name: { workspaceId, name: labelName } },
-                  create: { workspaceId, name: labelName, color: colorForStatus(labelName) },
+                  where: { workspaceId_name: { workspaceId, name: singleLabelName } },
+                  create: { workspaceId, name: singleLabelName, color: colorForStatus(singleLabelName) },
                   update: {},
                   select: { id: true, name: true },
                 });
+                labelByName.set(lowerKey, label);
               }
-              labelByName.set(lowerKey, label);
             }
-            await prisma.threadLabel.create({
-              data: { threadId, labelId: label.id, source: "WEBHOOK", confidence: 1.0 },
-            });
+            if (label) {
+              await prisma.threadLabel.deleteMany({
+                where: { threadId, source: "WEBHOOK" },
+              });
+              try {
+                await prisma.threadLabel.create({
+                  data: { threadId, labelId: label.id, source: "WEBHOOK", confidence: 1.0 },
+                });
+              } catch (err: unknown) {
+                if (!(err && typeof err === "object" && "code" in err && (err as { code: string }).code === "P2002")) {
+                  throw err;
+                }
+              }
+            }
           }
         }
       } catch (err) {
