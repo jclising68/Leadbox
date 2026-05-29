@@ -142,6 +142,7 @@ async function rateLimitedGet(apiKey: string, path: string, params?: Record<stri
 }
 
 type InstantlyLead = {
+  id?: string;
   email?: string;
   first_name?: string;
   last_name?: string;
@@ -160,6 +161,15 @@ type InstantlyLead = {
   /** UUIDs of custom tags assigned to this lead (manual tags from Instantly UI). */
   custom_tag_ids?: string[];
 };
+
+// Standard status tag names that LeadBox uses — these should never stack on
+// a lead simultaneously (contradictory classifications). Used by the Instantly
+// cleanup pass to remove stale tags that were pushed by old buggy syncs.
+const STANDARD_STATUS_TAGS = new Set([
+  "Interested", "Not Interested", "Meeting Booked", "Meeting Completed",
+  "Won", "Wrong Person", "Lost", "No Show", "Out of Office",
+  "Qualifying", "Maybe Future", "Auto Reply", "Neutral", "Replied",
+]);
 
 type InstantlyCustomTag = { id: string; label: string };
 
@@ -364,6 +374,11 @@ export async function enrichFromInstantly(
     console.warn(`[enrich] Failed to load custom tags (continuing without):`, err instanceof Error ? err.message : err);
   }
 
+  // Reverse: tagName → tagId — used by the cleanup pass to call toggle-resource.
+  const tagIdByLabel = new Map<string, string>(
+    Array.from(customTagById.entries()).map(([id, name]) => [name, id])
+  );
+
   // 1c. Build reverse tag index: emailLower → Set<tagName>. Instantly's
   // /leads/list response does NOT carry custom_tag_ids on each lead object
   // (verified by direct API probe), but /leads/list DOES accept
@@ -371,6 +386,8 @@ export async function enrichFromInstantly(
   // tag. So we iterate each tag once and assemble the membership map upfront.
   // This replaces the previous (broken) approach of reading lead.custom_tag_ids.
   const emailToTagNames = new Map<string, Set<string>>();
+  // Also capture Instantly lead UUIDs for the tag-cleanup pass.
+  const emailToLeadId = new Map<string, string>();
   const TAG_MAX_PAGES_PER_TAG = 20; // cap per tag → 2,000 leads max; keeps worst-case bounded
   const TAG_MAP_BUDGET_FRACTION = 0.25; // reserve first 25% of time for tag resolution
   const tagMapStart = Date.now();
@@ -396,6 +413,7 @@ export async function enrichFromInstantly(
           let set = emailToTagNames.get(key);
           if (!set) { set = new Set(); emailToTagNames.set(key, set); }
           set.add(tagName);
+          if (l.id && !emailToLeadId.has(key)) emailToLeadId.set(key, l.id);
         }
         tagCursor = page.next_starting_after as string | undefined;
         if (!tagCursor) break;
@@ -630,6 +648,35 @@ export async function enrichFromInstantly(
                 if (!(err && typeof err === "object" && "code" in err && (err as { code: string }).code === "P2002")) {
                   throw err;
                 }
+              }
+            }
+          }
+
+          // Clean up stale standard-status custom tags from Instantly.
+          // These accumulated because the old sync pushed every label back
+          // to Instantly additively — so contradictory tags built up over time.
+          // Only remove tags we know about (in STANDARD_STATUS_TAGS) to avoid
+          // accidentally wiping user-defined non-status tags.
+          const leadId = emailToLeadId.get(emailLower) ?? (lead.id || undefined);
+          if (leadId) {
+            const tagsOnLead = emailToTagNames.get(emailLower) ?? new Set<string>();
+            const standardTagsOnLead = [...tagsOnLead].filter(t => STANDARD_STATUS_TAGS.has(t));
+            const keepTag = hasReply ? singleLabelName : null;
+            const tagsToRemove = standardTagsOnLead.filter(t => t !== keepTag);
+            const tagIdsToRemove = tagsToRemove
+              .map(t => tagIdByLabel.get(t))
+              .filter((id): id is string => !!id);
+            if (tagIdsToRemove.length > 0) {
+              try {
+                await rateLimitedPost(apiKey, "/custom-tags/toggle-resource", {
+                  tag_ids: tagIdsToRemove,
+                  resource_ids: [leadId],
+                  resource_type: 1,
+                  assign: false,
+                });
+                console.log(`[enrich] Removed ${tagIdsToRemove.length} stale tag(s) from ${lead.email} in Instantly`);
+              } catch (err) {
+                console.warn(`[enrich] Failed to remove tags from ${lead.email}:`, err instanceof Error ? err.message : err);
               }
             }
           }
