@@ -517,6 +517,9 @@ export async function enrichFromInstantly(
         // filter queries against each tag.
         const customTagLabels = Array.from(emailToTagNames.get(emailLower) ?? []);
 
+        // Whether this lead has actually replied — gates both import and labels.
+        const hasReply = (lead.email_reply_count ?? 0) > 0;
+
         // Build update data
         const updateData = buildUpdateData(
           lead, lead.email,
@@ -543,12 +546,10 @@ export async function enrichFromInstantly(
           enriched++;
         } else {
           // ---- IMPORT new lead ----
-          // Strict gate: only import leads that have actually replied.
-          // Tags alone are not enough — a tagged lead with 0 replies has no
-          // messages to show in the inbox and creates misleading label state.
-          const hasReply = (lead.email_reply_count ?? 0) > 0;
-          if (!hasReply) {
-            continue; // No reply — skip import
+          // Skip leads with no reply and no tag — pure noise (in-sequence, bounced, etc.)
+          const hasTag = !!interestLabel || customTagLabels.length > 0;
+          if (!hasReply && !hasTag) {
+            continue;
           }
 
           try {
@@ -589,11 +590,10 @@ export async function enrichFromInstantly(
           }
         }
 
-        // Apply a single label to the thread. interestLabel (lt_interest_status)
-        // is authoritative — it takes priority over custom tags. If neither is
-        // set, skip. Multiple simultaneous WEBHOOK labels cause contradictory
-        // state (e.g. Interested + Wrong Person) so we enforce exactly one.
-        if (threadId) {
+        // Apply a single label only if the lead has actually replied.
+        // Tags from Instantly on leads with no reply are unreliable and
+        // produce contradictory state — skip entirely until they engage.
+        if (threadId && hasReply) {
           const singleLabelName = interestLabel ?? customTagLabels[0];
           if (singleLabelName) {
             const lowerKey = singleLabelName.toLowerCase();
