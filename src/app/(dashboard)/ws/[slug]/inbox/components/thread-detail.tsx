@@ -132,6 +132,7 @@ export function ThreadDetail() {
   const [pipelineSaving, setPipelineSaving] = useState(false);
   const [followUpDrafting, setFollowUpDrafting] = useState(false);
   const [redrafting, setRedrafting] = useState(false);
+  const [draftDismissed, setDraftDismissed] = useState(false);
 
   // Fetch AI draft for the current thread
   const { data: aiDraft } = useQuery({
@@ -171,16 +172,17 @@ export function ThreadDetail() {
 
   // Pre-fill composer when a READY draft arrives and user hasn't typed anything
   useEffect(() => {
-    if (aiDraft?.status === "READY" && !draftApplied && !replyText) {
+    if (aiDraft?.status === "READY" && !draftApplied && !replyText && !draftDismissed) {
       setReplyText(aiDraft.body);
       setDraftApplied(true);
     }
-  }, [aiDraft?.status, aiDraft?.body, draftApplied, replyText]);
+  }, [aiDraft?.status, aiDraft?.body, draftApplied, replyText, draftDismissed]);
 
   // Clear reply draft when switching threads
   useEffect(() => {
     setReplyText("");
     setDraftApplied(false);
+    setDraftDismissed(false);
     setAttachments([]);
   }, [selectedThreadId]);
 
@@ -707,12 +709,14 @@ export function ThreadDetail() {
               Generating AI Draft…
             </div>
           )}
-          {aiDraft?.status === "READY" && draftApplied && (
+          {(aiDraft?.status === "READY" || aiDraft?.status === "DISCARDED") && (
             <div className="flex items-center gap-1.5 mb-2">
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-500/10 text-violet-600 dark:text-violet-300 ring-1 ring-inset ring-violet-500/25">
-                <Sparkles className="h-2.5 w-2.5" />
-                AI Draft
-              </span>
+              {aiDraft.status === "READY" && draftApplied && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-500/10 text-violet-600 dark:text-violet-300 ring-1 ring-inset ring-violet-500/25">
+                  <Sparkles className="h-2.5 w-2.5" />
+                  AI Draft
+                </span>
+              )}
               <button
                 type="button"
                 disabled={redrafting}
@@ -722,6 +726,7 @@ export function ThreadDetail() {
                   setRedrafting(true);
                   setReplyText("");
                   setDraftApplied(false);
+                  setDraftDismissed(false);
                   try {
                     await fetch(`/api/threads/${selectedThreadId}/draft`, {
                       method: "POST",
@@ -737,24 +742,22 @@ export function ThreadDetail() {
                 {redrafting ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <RotateCcw className="h-2.5 w-2.5" />}
                 Redraft
               </button>
-              <span className="text-muted-foreground/40 text-xs">·</span>
-              <button
-                type="button"
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                onClick={async () => {
-                  setReplyText("");
-                  setDraftApplied(false);
-                  if (workspaceId && selectedThreadId) {
-                    await fetch(`/api/threads/${selectedThreadId}/draft`, {
-                      method: "DELETE",
-                      headers: { "x-workspace-id": workspaceId },
-                    });
-                    queryClient.invalidateQueries({ queryKey: ["ai-draft", selectedThreadId] });
-                  }
-                }}
-              >
-                Discard
-              </button>
+              {aiDraft.status === "READY" && draftApplied && (
+                <>
+                  <span className="text-muted-foreground/40 text-xs">·</span>
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => {
+                      setReplyText("");
+                      setDraftApplied(false);
+                      setDraftDismissed(true);
+                    }}
+                  >
+                    Discard
+                  </button>
+                </>
+              )}
             </div>
           )}
 
