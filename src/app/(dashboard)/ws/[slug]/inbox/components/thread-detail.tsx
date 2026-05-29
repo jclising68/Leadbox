@@ -131,6 +131,7 @@ export function ThreadDetail() {
   const [pipelineValue, setPipelineValue] = useState("");
   const [pipelineSaving, setPipelineSaving] = useState(false);
   const [followUpDrafting, setFollowUpDrafting] = useState(false);
+  const [redrafting, setRedrafting] = useState(false);
 
   // Fetch AI draft for the current thread
   const { data: aiDraft } = useQuery({
@@ -712,6 +713,31 @@ export function ThreadDetail() {
                 <Sparkles className="h-2.5 w-2.5" />
                 AI Draft
               </span>
+              <button
+                type="button"
+                disabled={redrafting}
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                onClick={async () => {
+                  if (!workspaceId || !selectedThreadId) return;
+                  setRedrafting(true);
+                  setReplyText("");
+                  setDraftApplied(false);
+                  try {
+                    await fetch(`/api/threads/${selectedThreadId}/draft`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", "x-workspace-id": workspaceId },
+                      body: JSON.stringify({}),
+                    });
+                    queryClient.invalidateQueries({ queryKey: ["ai-draft", selectedThreadId] });
+                  } finally {
+                    setRedrafting(false);
+                  }
+                }}
+              >
+                {redrafting ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <RotateCcw className="h-2.5 w-2.5" />}
+                Redraft
+              </button>
+              <span className="text-muted-foreground/40 text-xs">·</span>
               <button
                 type="button"
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors"

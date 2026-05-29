@@ -43,6 +43,7 @@ export default function AIReplyPage() {
   const [openaiKeyInput, setOpenaiKeyInput] = useState("");
   const [editingClaude, setEditingClaude] = useState(false);
   const [editingOpenai, setEditingOpenai] = useState(false);
+  const [instructionsInput, setInstructionsInput] = useState<string | null>(null);
 
   const headers = { "x-workspace-id": workspaceId!, "Content-Type": "application/json" };
 
@@ -404,15 +405,31 @@ export default function AIReplyPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <Textarea
-            defaultValue={aiReplyInstructions}
+            value={instructionsInput ?? aiReplyInstructions}
             placeholder="e.g. You are a friendly SDR at AcmeCo selling HR software. Goal is to book a 15-min demo. Keep replies under 100 words and address the lead's question directly."
             className="min-h-[100px] resize-none"
-            onBlur={(e) => patchWorkspace.mutate({ aiReplyInstructions: e.target.value })}
+            onChange={(e) => setInstructionsInput(e.target.value)}
           />
-          <p className="text-xs text-muted-foreground">
-            The AI also uses the full conversation history, lead name, company, title, and
-            campaign name as context automatically.
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              The AI also uses the full conversation history, lead name, company, title, and
+              campaign name as context automatically.
+            </p>
+            <Button
+              size="sm"
+              className="gap-1.5 shrink-0"
+              disabled={instructionsInput === null || patchWorkspace.isPending}
+              onClick={() => {
+                patchWorkspace.mutate(
+                  { aiReplyInstructions: instructionsInput ?? aiReplyInstructions },
+                  { onSuccess: () => { toast.success("Instructions saved"); setInstructionsInput(null); } }
+                );
+              }}
+            >
+              {patchWorkspace.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              Save
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
