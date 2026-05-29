@@ -30,6 +30,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         source: "Email",
         campaignName: "Test Campaign",
         stepReplied: "Step 1",
+        replyText: "Hi, I'm interested in learning more about your offer.",
         notes: "Sample note from test",
         feedback: null,
         timestamp: new Date().toISOString(),

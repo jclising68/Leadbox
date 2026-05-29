@@ -16,6 +16,7 @@ interface OutboundPayload {
   campaignName: string | null;
   stepReplied: string | null;
   label: string | null;
+  replyText: string | null;
   notes: string | null;
   feedback: string | null;
   timestamp: string;

@@ -166,6 +166,7 @@ export async function POST(req: NextRequest) {
             campaignName: normalized.campaignName ?? null,
             stepReplied: prospect.stepReplied ?? null,
             label: prospect.leadStatus ?? null,
+            replyText: message.bodyText ?? message.messageText ?? null,
             notes: prospect.notes ?? null,
             feedback: prospect.feedback ?? null,
             timestamp: new Date().toISOString(),

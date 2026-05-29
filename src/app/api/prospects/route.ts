@@ -94,7 +94,12 @@ export async function PATCH(req: NextRequest) {
 
     // Fire outbound webhooks for lead_tagged if a tag was applied (not cleared)
     if (leadStatus) {
-      fireOutboundWebhooks(workspaceId!, {
+      const threadId = prospect.thread!.id;
+      prisma.message.findFirst({
+        where: { threadId, direction: "INBOUND" },
+        orderBy: { receivedAt: "desc" },
+        select: { bodyText: true, messageText: true },
+      }).then((latestReply) => fireOutboundWebhooks(workspaceId!, {
         event: "lead_tagged",
         email: updated.email,
         firstName: updated.firstName,
@@ -108,10 +113,11 @@ export async function PATCH(req: NextRequest) {
         campaignName: updated.campaignName ?? null,
         stepReplied: updated.stepReplied ?? null,
         label: leadStatus,
+        replyText: latestReply?.bodyText ?? latestReply?.messageText ?? null,
         notes: updated.notes ?? null,
         feedback: updated.feedback ?? null,
         timestamp: new Date().toISOString(),
-      }).catch((err) => console.error("[prospects patch] outbound webhook failed:", err));
+      })).catch((err) => console.error("[prospects patch] outbound webhook failed:", err));
     }
   }
 
