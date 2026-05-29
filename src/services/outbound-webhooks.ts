@@ -48,12 +48,18 @@ export async function fireOutboundWebhooks(
 
   if (matching.length === 0) return;
 
+  // For lead_tagged: put the label name in event, drop the separate label field
+  const outgoing =
+    payload.event === "lead_tagged" && payload.label
+      ? (({ label: _label, ...rest }) => ({ ...rest, event: _label }))(payload)
+      : payload;
+
   await Promise.allSettled(
     matching.map((h) =>
       fetch(h.url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(outgoing),
       })
     )
   );

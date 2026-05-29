@@ -18,7 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        event: "test",
+        event: "Interested",
         email: "test@example.com",
         firstName: "Test",
         lastName: "Lead",
@@ -30,7 +30,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         source: "Email",
         campaignName: "Test Campaign",
         stepReplied: "Step 1",
-        label: "Interested",
         notes: "Sample note from test",
         feedback: null,
         timestamp: new Date().toISOString(),
