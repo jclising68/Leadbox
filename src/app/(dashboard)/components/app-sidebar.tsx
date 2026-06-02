@@ -6,14 +6,15 @@ import {
   Inbox,
   MailOpen,
   Briefcase,
-  BarChart2,
+  Activity,
+  LineChart,
   Archive,
   Trash2,
   AlertCircle,
   PanelLeftClose,
   PanelLeftOpen,
   Check,
-  Kanban,
+  Milestone,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -43,8 +44,9 @@ const mainNavItems = [
   { label: "Inbox", path: "/inbox", icon: Inbox, matchEnd: "/inbox" },
   { label: "Outbound Inbox", path: "/outbound-inbox", icon: MailOpen, matchEnd: "/outbound-inbox" },
   { label: "Leads", path: "/leads", icon: Briefcase, matchEnd: "/leads" },
-  { label: "Pipeline", path: "/pipeline", icon: Kanban, matchEnd: "/pipeline" },
-  { label: "KPI", path: "/kpi", icon: BarChart2, matchEnd: "/kpi" },
+  { label: "Pipeline", path: "/pipeline", icon: Milestone, matchEnd: "/pipeline" },
+  { label: "KPI", path: "/kpi", icon: Activity, matchEnd: "/kpi" },
+  { label: "Reporting", path: "/reporting", icon: LineChart, matchEnd: "/reporting" },
 ];
 
 const bottomNavItems = [

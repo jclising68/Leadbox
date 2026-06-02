@@ -33,6 +33,7 @@ import { useRouter, useParams } from "next/navigation";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type PipelineStage = { id: string; name: string; color: string; sortOrder: number };
+type StageFormItem = { id?: string; name: string; color: string };
 
 type Pipeline = {
   id: string;
@@ -175,13 +176,13 @@ function PipelineFormDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  onSave: (name: string, stages: Array<{ name: string; color: string }>) => void;
+  onSave: (name: string, stages: StageFormItem[]) => void;
   initial?: Pipeline | null;
   isPending: boolean;
 }) {
   const uid = useId();
   const [name, setName] = useState("");
-  const [stages, setStages] = useState<Array<{ name: string; color: string }>>(DEFAULT_STAGES);
+  const [stages, setStages] = useState<StageFormItem[]>(DEFAULT_STAGES);
 
   // Sync on open
   const prevOpen = useRef(false);
@@ -191,7 +192,7 @@ function PipelineFormDialog({
       setName(initial?.name ?? "");
       setStages(
         initial?.stages.length
-          ? initial.stages.map((s) => ({ name: s.name, color: s.color }))
+          ? initial.stages.map((s) => ({ id: s.id, name: s.name, color: s.color }))
           : DEFAULT_STAGES
       );
     }, 0);
@@ -202,7 +203,7 @@ function PipelineFormDialog({
     setStages((p) => [...p, { name: "", color: PRESET_COLORS[p.length % PRESET_COLORS.length] }]);
   }
 
-  function updateStage(i: number, s: { name: string; color: string }) {
+  function updateStage(i: number, s: StageFormItem) {
     setStages((p) => p.map((x, j) => j === i ? s : x));
   }
 
@@ -649,20 +650,78 @@ export default function PipelinePage() {
     onError: (e) => toast.error(e.message),
   });
 
-  const updatePipeline = useMutation({
-    mutationFn: async ({ id, name }: { id: string; name: string }) => {
-      const res = await fetch(`/api/pipeline/${id}`, {
-        method: "PATCH",
-        headers: hdrs(workspaceId!),
-        body: JSON.stringify({ name }),
-      });
-      if (!res.ok) throw new Error("Failed");
+  const updatePipelineWithStages = useMutation({
+    mutationFn: async ({
+      id,
+      name,
+      formStages,
+      existingStages,
+    }: {
+      id: string;
+      name: string;
+      formStages: StageFormItem[];
+      existingStages: PipelineStage[];
+    }) => {
+      const ops: Promise<Response>[] = [];
+
+      // Rename if changed
+      const current = pipelines.find((p) => p.id === id);
+      if (!current || current.name !== name.trim()) {
+        ops.push(fetch(`/api/pipeline/${id}`, {
+          method: "PATCH",
+          headers: hdrs(workspaceId!),
+          body: JSON.stringify({ name }),
+        }));
+      }
+
+      // PATCH existing stages that changed name or color
+      for (const fs of formStages) {
+        if (!fs.id) continue;
+        const orig = existingStages.find((s) => s.id === fs.id);
+        if (orig && (orig.name !== fs.name.trim() || orig.color !== fs.color)) {
+          ops.push(fetch(`/api/pipeline/stages/${fs.id}`, {
+            method: "PATCH",
+            headers: hdrs(workspaceId!),
+            body: JSON.stringify({ name: fs.name.trim(), color: fs.color }),
+          }));
+        }
+      }
+
+      // POST brand-new stages (no id)
+      for (const fs of formStages) {
+        if (fs.id || !fs.name.trim()) continue;
+        ops.push(fetch("/api/pipeline/stages", {
+          method: "POST",
+          headers: hdrs(workspaceId!),
+          body: JSON.stringify({ pipelineId: id, name: fs.name.trim(), color: fs.color }),
+        }));
+      }
+
+      // DELETE stages removed from the form
+      const keptIds = new Set(formStages.filter((s) => s.id).map((s) => s.id));
+      for (const orig of existingStages) {
+        if (!keptIds.has(orig.id)) {
+          ops.push(fetch(`/api/pipeline/stages/${orig.id}`, {
+            method: "DELETE",
+            headers: hdrs(workspaceId!),
+          }));
+        }
+      }
+
+      const results = await Promise.all(ops);
+      for (const res of results) {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ error: "Failed" }));
+          throw new Error(body.error ?? "Failed to update pipeline");
+        }
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pipelines", workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ["pipeline-deals", workspaceId, activePipelineId] });
       setPipelineFormOpen(false);
       setEditingPipeline(null);
-      toast.success("Pipeline renamed");
+      toast.success("Pipeline updated");
     },
     onError: (e) => toast.error(e.message),
   });
@@ -773,9 +832,14 @@ export default function PipelinePage() {
     draggingDealId.current = null;
   }
 
-  function handleSavePipeline(name: string, stages: Array<{ name: string; color: string }>) {
+  function handleSavePipeline(name: string, stages: StageFormItem[]) {
     if (editingPipeline) {
-      updatePipeline.mutate({ id: editingPipeline.id, name });
+      updatePipelineWithStages.mutate({
+        id: editingPipeline.id,
+        name,
+        formStages: stages,
+        existingStages: editingPipeline.stages,
+      });
     } else {
       createPipeline.mutate({ name, stages });
     }
@@ -840,7 +904,7 @@ export default function PipelinePage() {
                 onClick={() => { setEditingPipeline(activePipeline); setPipelineFormOpen(true); }}
               >
                 <Pencil className="h-3.5 w-3.5" />
-                Rename
+                Edit pipeline
               </Button>
               <Button
                 size="sm"
@@ -933,7 +997,7 @@ export default function PipelinePage() {
         onClose={() => { setPipelineFormOpen(false); setEditingPipeline(null); }}
         onSave={handleSavePipeline}
         initial={editingPipeline}
-        isPending={createPipeline.isPending || updatePipeline.isPending}
+        isPending={createPipeline.isPending || updatePipelineWithStages.isPending}
       />
 
       {/* Deal dialog */}

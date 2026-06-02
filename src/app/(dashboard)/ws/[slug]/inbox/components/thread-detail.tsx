@@ -45,7 +45,7 @@ import {
   ChevronDown,
   RotateCcw,
   ShieldCheck,
-  Clock,
+  MailOpen,
   Globe,
   Briefcase,
   Zap,
@@ -55,8 +55,8 @@ import {
   MessageSquare,
   Send,
   Paperclip,
-  BellRing,
-  Kanban,
+  CalendarClock,
+  Milestone,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -305,7 +305,7 @@ export function ThreadDetail() {
                 toast.success(thread.isUnread ? "Marked as read" : "Marked as unread");
               }}
             >
-              <Clock className="h-3.5 w-3.5" />
+              <MailOpen className="h-3.5 w-3.5" />
             </Button>
 
             {/* Follow-up date picker */}
@@ -331,7 +331,7 @@ export function ThreadDetail() {
                   ? `Follow-up set: ${new Date(thread.followUpAt).toLocaleDateString()}`
                   : "Set follow-up reminder"}
               >
-                <BellRing className="h-3.5 w-3.5" />
+                <CalendarClock className="h-3.5 w-3.5" />
               </PopoverTrigger>
               <PopoverContent align="end" className="w-72 p-4">
                 <p className="text-sm font-medium mb-3">Set follow-up reminder</p>
@@ -501,7 +501,7 @@ export function ThreadDetail() {
                 setPipelineOpen(true);
               }}
             >
-              <Kanban className="h-3.5 w-3.5" />
+              <Milestone className="h-3.5 w-3.5" />
             </button>
 
             <DropdownMenu>
@@ -793,7 +793,7 @@ export function ThreadDetail() {
                   }
                 }}
               >
-                {followUpDrafting ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <BellRing className="h-2.5 w-2.5" />}
+                {followUpDrafting ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <CalendarClock className="h-2.5 w-2.5" />}
                 Draft Follow Up
               </button>
             </div>
@@ -1154,7 +1154,7 @@ export function ThreadDetail() {
                   <h5 className="text-xs font-semibold uppercase text-muted-foreground">Pipeline</h5>
                   {(thread.prospect as { pipelineDeals: { id: string; pipeline: { name: string }; stage: { name: string; color: string } }[] }).pipelineDeals.map((deal) => (
                     <div key={deal.id} className="flex items-center gap-2">
-                      <Kanban className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <Milestone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       <div className="min-w-0">
                         <p className="text-xs text-muted-foreground">{deal.pipeline.name}</p>
                         <div className="flex items-center gap-1.5">

@@ -56,12 +56,15 @@ export async function fireOutboundWebhooks(
       : payload;
 
   await Promise.allSettled(
-    matching.map((h) =>
-      fetch(h.url, {
+    matching.map((h) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10_000);
+      return fetch(h.url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(outgoing),
-      })
-    )
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+    })
   );
 }
