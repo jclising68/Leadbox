@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/crypto";
 import { resolveThread } from "@/services/thread-resolver";
 import { updateSyncProgress } from "@/services/sync-progress";
+import { fireOutboundWebhooks } from "@/services/outbound-webhooks";
 import type { NormalizedWebhookPayload } from "@/types";
 
 // Correct HeyReach API base URL (ABP framework, public API)
@@ -387,8 +388,32 @@ export async function syncHeyreach(
     await Promise.allSettled(
       batch.map(async (payload) => {
         try {
-          await resolveThread(workspaceId, integrationId, payload);
+          const resolved = await resolveThread(workspaceId, integrationId, payload);
           synced++;
+
+          // Fire outbound webhook for new inbound replies picked up by cron sync
+          if (resolved.isNewMessage && payload.direction === "INBOUND") {
+            const p = resolved.prospect;
+            fireOutboundWebhooks(workspaceId, {
+              event: "reply_received",
+              email: p.email ?? null,
+              firstName: p.firstName ?? null,
+              lastName: p.lastName ?? null,
+              company: p.company ?? null,
+              domain: p.domain ?? null,
+              phone: p.phone ?? null,
+              title: p.title ?? null,
+              linkedinUrl: p.linkedinUrl ?? null,
+              source: "LinkedIn",
+              campaignName: p.campaignName ?? payload.campaignName ?? null,
+              stepReplied: p.stepReplied ?? null,
+              label: p.leadStatus ?? null,
+              replyText: payload.messageText ?? payload.bodyText ?? null,
+              notes: p.notes ?? null,
+              feedback: p.feedback ?? null,
+              timestamp: new Date().toISOString(),
+            }).catch((err) => console.error("[heyreach-sync] outbound webhook failed:", err));
+          }
         } catch {
           errors++;
         }

@@ -4,6 +4,7 @@ import { resolveThread } from "@/services/thread-resolver";
 import { updateSyncProgress } from "@/services/sync-progress";
 import { applyAutoLabel } from "@/services/auto-labeler";
 import { INTEREST_STATUS_TO_LABEL } from "@/services/provider-tags";
+import { fireOutboundWebhooks } from "@/services/outbound-webhooks";
 import type { NormalizedWebhookPayload } from "@/types";
 
 const INSTANTLY_API_BASE = "https://api.instantly.ai/api/v2";
@@ -539,8 +540,33 @@ export async function syncInstantly(
         skipped++;
         continue;
       }
-      await resolveThread(workspaceId, integrationId, payload);
+      const resolved = await resolveThread(workspaceId, integrationId, payload);
       synced++;
+
+      // Fire outbound webhook for new inbound replies picked up by cron sync
+      if (resolved.isNewMessage && payload.direction === "INBOUND") {
+        const p = resolved.prospect;
+        fireOutboundWebhooks(workspaceId, {
+          event: "reply_received",
+          email: p.email ?? null,
+          firstName: p.firstName ?? null,
+          lastName: p.lastName ?? null,
+          company: p.company ?? null,
+          domain: p.domain ?? null,
+          phone: p.phone ?? null,
+          title: p.title ?? null,
+          linkedinUrl: p.linkedinUrl ?? null,
+          source: "Email",
+          campaignName: p.campaignName ?? payload.campaignName ?? null,
+          stepReplied: p.stepReplied ?? null,
+          label: p.leadStatus ?? null,
+          replyText: payload.bodyText ?? null,
+          notes: p.notes ?? null,
+          feedback: p.feedback ?? null,
+          timestamp: new Date().toISOString(),
+        }).catch((err) => console.error("[instantly-sync] outbound webhook failed:", err));
+      }
+
       // Collect replied lead UUIDs for status sync below
       if (email.ue_type === 2 && email.lead) {
         repliedLeadIds.add(email.lead);
