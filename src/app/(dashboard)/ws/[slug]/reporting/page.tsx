@@ -91,9 +91,10 @@ function generateInsight(type: string, data: ReportData): string {
     case "labels": {
       if (!data.labelDistribution.length) return "No labeled threads yet. Apply labels in the inbox to start tracking outcomes.";
       const total = data.labelDistribution.reduce((s, l) => s + l.count, 0);
-      const interested = data.labelDistribution.find((l) =>
-        l.label.toLowerCase().includes("interest")
-      );
+      const interested = data.labelDistribution.find((l) => {
+        const name = l.label.toLowerCase();
+        return name === "interested" || (name.includes("interest") && !name.includes("not"));
+      });
       if (interested) {
         const pct = Math.round((interested.count / total) * 100);
         return `${pct}% of tagged replies are Interested — your targeting is working. Use this breakdown to understand the full mix of outcomes and spot where leads are dropping off.`;
