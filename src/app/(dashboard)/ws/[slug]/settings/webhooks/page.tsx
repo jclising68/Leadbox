@@ -12,14 +12,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -269,74 +261,67 @@ export default function WebhooksPage() {
               No outbound webhooks yet. Click &ldquo;Add Webhook&rdquo; to get started.
             </p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Label</TableHead>
-                  <TableHead>URL</TableHead>
-                  <TableHead>Event Type</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="w-24" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {hooks.map((hook) => (
-                  <TableRow key={hook.id}>
-                    <TableCell className="font-medium text-sm">{hook.label}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground max-w-xs truncate">
-                      {hook.url}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col gap-1">
-                        <Badge variant="outline" className="text-xs font-normal w-fit">
-                          {TRIGGER_LABELS[triggersToMode(hook.triggers)]}
-                        </Badge>
-                        {(hook.tagFilters ?? []).length > 0 && (
-                          <span className="text-[10px] text-muted-foreground">
-                            Tags: {(hook.tagFilters ?? []).join(", ")}
-                          </span>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <button
-                        onClick={() => toggleMutation.mutate({ id: hook.id, isActive: !hook.isActive })}
-                        className="inline-flex items-center gap-1.5 text-xs"
-                      >
-                        {hook.isActive ? (
-                          <><ToggleRight className="h-4 w-4 text-green-500" /><span className="text-green-600 dark:text-green-400">Active</span></>
-                        ) : (
-                          <><ToggleLeft className="h-4 w-4 text-muted-foreground" /><span className="text-muted-foreground">Inactive</span></>
-                        )}
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1 justify-end">
-                        <button
-                          onClick={() => handleTest(hook)}
-                          disabled={testingId === hook.id}
-                          title="Send test payload"
-                          className="p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {testingId === hook.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Send className="h-3.5 w-3.5" />
-                          )}
-                        </button>
-                        <button
-                          onClick={() => deleteMutation.mutate(hook.id)}
-                          title="Delete webhook"
-                          className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <div className="space-y-2">
+              {hooks.map((hook) => (
+                <div key={hook.id} className="rounded-lg border border-border bg-card px-4 py-3 flex items-start gap-3">
+                  {/* Main info */}
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-foreground">{hook.label}</span>
+                      <Badge variant="outline" className="text-xs font-normal">
+                        {TRIGGER_LABELS[triggersToMode(hook.triggers)]}
+                      </Badge>
+                    </div>
+                    <p className="font-mono text-xs text-muted-foreground truncate">{hook.url}</p>
+                    {(hook.tagFilters ?? []).length > 0 && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Tags: {(hook.tagFilters ?? []).join(", ")}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Actions — always visible, never overflow */}
+                  <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                    {/* Toggle active */}
+                    <button
+                      onClick={() => toggleMutation.mutate({ id: hook.id, isActive: !hook.isActive })}
+                      title={hook.isActive ? "Disable webhook" : "Enable webhook"}
+                      className="inline-flex items-center gap-1 px-2 h-7 rounded-md text-xs border border-border hover:bg-accent transition-colors"
+                    >
+                      {hook.isActive ? (
+                        <><ToggleRight className="h-3.5 w-3.5 text-green-500" /><span className="text-green-600 dark:text-green-400">Active</span></>
+                      ) : (
+                        <><ToggleLeft className="h-3.5 w-3.5 text-muted-foreground" /><span className="text-muted-foreground">Inactive</span></>
+                      )}
+                    </button>
+
+                    {/* Test */}
+                    <button
+                      onClick={() => handleTest(hook)}
+                      disabled={testingId === hook.id}
+                      title="Send test payload"
+                      className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                    >
+                      {testingId === hook.id
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <Send className="h-3.5 w-3.5" />}
+                    </button>
+
+                    {/* Delete */}
+                    <button
+                      onClick={() => {
+                        if (!confirm(`Delete webhook "${hook.label}"?`)) return;
+                        deleteMutation.mutate(hook.id);
+                      }}
+                      title="Delete webhook"
+                      className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -353,38 +338,25 @@ export default function WebhooksPage() {
               No webhook events received yet.
             </p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Provider</TableHead>
-                  <TableHead>Event</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Error</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {logs.map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {new Date(log.createdAt).toLocaleString()}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{log.provider}</Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{log.eventType}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={statusColor[log.status]}>
-                        {log.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground max-w-xs truncate">
-                      {log.errorMessage || "-"}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <div className="space-y-2">
+              {logs.map((log) => (
+                <div key={log.id} className="rounded-lg border border-border bg-card px-4 py-3 flex items-center gap-3 flex-wrap">
+                  <span className="text-xs text-muted-foreground w-36 shrink-0">
+                    {new Date(log.createdAt).toLocaleString()}
+                  </span>
+                  <Badge variant="outline" className="shrink-0">{log.provider}</Badge>
+                  <span className="font-mono text-xs text-foreground shrink-0">{log.eventType}</span>
+                  <Badge variant="outline" className={`shrink-0 ${statusColor[log.status]}`}>
+                    {log.status}
+                  </Badge>
+                  {log.errorMessage && (
+                    <span className="text-xs text-muted-foreground truncate flex-1 min-w-0">
+                      {log.errorMessage}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
         </>
       )}
