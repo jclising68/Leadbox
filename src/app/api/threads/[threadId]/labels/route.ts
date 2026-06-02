@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { syncProviderTags } from "@/services/provider-tags";
+import { fireOutboundWebhooks } from "@/services/outbound-webhooks";
 
 /**
  * Local DB op + provider push are awaited inline (not via `after()`) so the
@@ -18,10 +19,22 @@ export async function POST(
   const { threadId } = await params;
   const { labelId } = await req.json();
 
-  // Verify thread belongs to workspace (include prospectId for status sync)
+  // Verify thread belongs to workspace; include prospect fields for outbound webhook
   const thread = await prisma.thread.findFirst({
     where: { id: threadId, workspaceId: workspaceId! },
-    select: { id: true, prospectId: true },
+    select: {
+      id: true,
+      channel: true,
+      prospectId: true,
+      prospect: {
+        select: {
+          email: true, firstName: true, lastName: true,
+          company: true, domain: true, phone: true,
+          title: true, linkedinUrl: true, campaignName: true,
+          stepReplied: true, notes: true, feedback: true,
+        },
+      },
+    },
   });
   if (!thread) {
     return NextResponse.json({ error: "Thread not found" }, { status: 404 });
@@ -52,6 +65,36 @@ export async function POST(
   }
 
   const providerSync = await syncProviderTags(workspaceId!, threadId);
+
+  // Fire outbound webhook — fire-and-forget, never blocks the response
+  if (thread.prospect) {
+    const p = thread.prospect;
+    prisma.message.findFirst({
+      where: { threadId, direction: "INBOUND" },
+      orderBy: { sentAt: "desc" },
+      select: { bodyText: true, messageText: true },
+    }).then((latestReply) =>
+      fireOutboundWebhooks(workspaceId!, {
+        event: "lead_tagged",
+        email: p.email ?? null,
+        firstName: p.firstName ?? null,
+        lastName: p.lastName ?? null,
+        company: p.company ?? null,
+        domain: p.domain ?? null,
+        phone: p.phone ?? null,
+        title: p.title ?? null,
+        linkedinUrl: p.linkedinUrl ?? null,
+        source: thread.channel === "LINKEDIN" ? "LinkedIn" : "Email",
+        campaignName: p.campaignName ?? null,
+        stepReplied: p.stepReplied ?? null,
+        label: label.name,
+        replyText: latestReply?.bodyText ?? latestReply?.messageText ?? null,
+        notes: p.notes ?? null,
+        feedback: p.feedback ?? null,
+        timestamp: new Date().toISOString(),
+      })
+    ).catch((err) => console.error("[thread labels POST] outbound webhook failed:", err));
+  }
 
   return NextResponse.json({ ...threadLabel, providerSync });
 }
