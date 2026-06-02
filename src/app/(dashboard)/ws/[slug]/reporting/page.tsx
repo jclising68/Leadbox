@@ -91,16 +91,22 @@ function generateInsight(type: string, data: ReportData): string {
     case "labels": {
       if (!data.labelDistribution.length) return "No labeled threads yet. Apply labels in the inbox to start tracking outcomes.";
       const total = data.labelDistribution.reduce((s, l) => s + l.count, 0);
-      const interested = data.labelDistribution.find((l) => {
-        const name = l.label.toLowerCase();
-        return name === "interested" || (name.includes("interest") && !name.includes("not"));
-      });
-      if (interested) {
-        const pct = Math.round((interested.count / total) * 100);
-        return `${pct}% of tagged replies are Interested — your targeting is working. Use this breakdown to understand the full mix of outcomes and spot where leads are dropping off.`;
-      }
       const top = data.labelDistribution[0];
-      return `"${top.label}" is the most common outcome with ${top.count} threads. Review these to find patterns in how leads are responding.`;
+      const topPct = Math.round((top.count / total) * 100);
+      const interested = data.labelDistribution.find((l) => {
+        const n = l.label.toLowerCase();
+        return n === "interested" || (n.includes("interest") && !n.includes("not"));
+      });
+      const interestedPct = interested ? Math.round((interested.count / total) * 100) : 0;
+
+      // Lead with the dominant outcome, then mention Interested conversion rate
+      const topLine = `"${top.label}" is your most common outcome at ${topPct}%.`;
+      if (interested && interestedPct >= 20) {
+        return `${topLine} ${interestedPct}% of tagged replies are Interested — solid conversion rate worth doubling down on.`;
+      } else if (interested && interestedPct > 0) {
+        return `${topLine} Only ${interestedPct}% are Interested — review your targeting and messaging to improve that ratio.`;
+      }
+      return `${topLine} Review these outcomes to find patterns in how leads are responding and where to focus next.`;
     }
     default:
       return "";
