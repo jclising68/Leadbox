@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,11 @@ export function ComposeDialog({ open, onClose }: ComposeDialogProps) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [sending, setSending] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+
+  useEffect(() => {
+    if (open) setPreviewing(false);
+  }, [open]);
 
   const { data: channelsData } = useQuery<{ channels: SmtpChannel[] }>({
     queryKey: ["smtp-channels", workspaceId],
@@ -53,6 +58,7 @@ export function ComposeDialog({ open, onClose }: ComposeDialogProps) {
     setSubject("");
     setBody("");
     setAttachments([]);
+    setPreviewing(false);
     onClose();
   }
 
@@ -106,124 +112,199 @@ export function ComposeDialog({ open, onClose }: ComposeDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>New message</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3">
-          {/* From */}
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">From</Label>
-            <select
-              value={fromEmail}
-              onChange={(e) => setFromEmail(e.target.value)}
-              className="w-full text-sm rounded-md border border-input bg-background px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring/40"
-            >
-              <option value="">Select sending mailbox…</option>
-              {channels.map((ch) => (
-                <option key={ch.id} value={ch.email}>
-                  {ch.displayName ? `${ch.displayName} <${ch.email}>` : ch.email}
-                </option>
-              ))}
-            </select>
-            {channels.length === 0 && (
-              <p className="text-xs text-muted-foreground">
-                No mailboxes connected. Import them in Settings → Channels.
-              </p>
-            )}
-          </div>
+        {previewing ? (
+          /* ── Email preview ── */
+          <div className="space-y-3">
+            <div className="rounded-lg border border-border bg-background overflow-hidden">
+              {/* Email header rows */}
+              <div className="border-b border-border px-4 py-3 space-y-2 text-sm">
+                <div className="flex gap-2">
+                  <span className="w-14 shrink-0 text-muted-foreground">From:</span>
+                  <span className="font-medium">{fromEmail || <span className="text-muted-foreground italic">—</span>}</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="w-14 shrink-0 text-muted-foreground">To:</span>
+                  <span className="font-medium">{toEmail || <span className="text-muted-foreground italic">—</span>}</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="w-14 shrink-0 text-muted-foreground">Subject:</span>
+                  <span className="font-semibold">{subject || <span className="text-muted-foreground italic">(no subject)</span>}</span>
+                </div>
+              </div>
+              {/* Email body */}
+              <div
+                className="px-4 py-4 text-sm min-h-[240px] max-h-[400px] overflow-y-auto leading-relaxed whitespace-pre-wrap"
+                dangerouslySetInnerHTML={{
+                  __html: body
+                    ? body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br />")
+                    : '<span style="color:#888;font-style:italic">No message body yet.</span>',
+                }}
+              />
+              {/* Attachments in preview */}
+              {attachments.length > 0 && (
+                <div className="border-t border-border px-4 py-3 flex flex-wrap gap-1.5">
+                  {attachments.map((a, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-muted border border-border">
+                      <Paperclip className="h-3 w-3 text-muted-foreground" />
+                      <span className="truncate max-w-[160px]">{a.name}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
 
-          {/* To */}
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">To</Label>
-            <Input
-              type="email"
-              placeholder="recipient@example.com"
-              value={toEmail}
-              onChange={(e) => setToEmail(e.target.value)}
-              className="text-sm h-9"
-            />
-          </div>
-
-          {/* Subject */}
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Subject</Label>
-            <Input
-              placeholder="(no subject)"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              className="text-sm h-9"
-            />
-          </div>
-
-          {/* Body */}
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Message</Label>
-            <textarea
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[120px] max-h-[240px] resize-none focus:outline-none focus:ring-2 focus:ring-ring/40 placeholder:text-muted-foreground"
-              placeholder="Write your message…"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-            />
-          </div>
-
-          {/* Attachments */}
-          {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {attachments.map((a, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-muted border border-border max-w-[200px]"
+            {/* Preview actions */}
+            <div className="flex items-center justify-between pt-1">
+              <Button variant="ghost" size="sm" onClick={() => setPreviewing(false)} disabled={sending}>
+                ← Edit
+              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={handleClose} disabled={sending}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={handleSend}
+                  disabled={sending || !fromEmail || !toEmail || !body.trim()}
                 >
-                  <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{a.name}</span>
-                  <button
-                    type="button"
-                    className="shrink-0 text-muted-foreground hover:text-destructive"
-                    onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="flex items-center justify-between pt-1">
-            <div className="flex items-center gap-2">
-              <input ref={attachFileRef} type="file" className="hidden" onChange={handleAttachFile} />
-              <button
-                type="button"
-                disabled={uploadingFile || sending}
-                onClick={() => attachFileRef.current?.click()}
-                className="text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
-                title="Attach file"
-              >
-                {uploadingFile ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Paperclip className="h-4 w-4" />
-                )}
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={handleClose} disabled={sending}>
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                className="gap-1.5"
-                onClick={handleSend}
-                disabled={sending || !fromEmail || !toEmail || !body.trim()}
-              >
-                {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                {sending ? "Sending…" : "Send"}
-              </Button>
+                  {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                  {sending ? "Sending…" : "Send"}
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          /* ── Compose form ── */
+          <div className="space-y-3">
+            {/* From */}
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">From</Label>
+              <select
+                value={fromEmail}
+                onChange={(e) => setFromEmail(e.target.value)}
+                className="w-full text-sm rounded-md border border-input bg-background px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring/40"
+              >
+                <option value="">Select sending mailbox…</option>
+                {channels.map((ch) => (
+                  <option key={ch.id} value={ch.email}>
+                    {ch.displayName ? `${ch.displayName} <${ch.email}>` : ch.email}
+                  </option>
+                ))}
+              </select>
+              {channels.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No mailboxes connected. Import them in Settings → Channels.
+                </p>
+              )}
+            </div>
+
+            {/* To */}
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">To</Label>
+              <Input
+                type="email"
+                placeholder="recipient@example.com"
+                value={toEmail}
+                onChange={(e) => setToEmail(e.target.value)}
+                className="text-sm h-9"
+              />
+            </div>
+
+            {/* Subject */}
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Subject</Label>
+              <Input
+                placeholder="(no subject)"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className="text-sm h-9"
+              />
+            </div>
+
+            {/* Body */}
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Message</Label>
+              <textarea
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[280px] max-h-[500px] resize-y focus:outline-none focus:ring-2 focus:ring-ring/40 placeholder:text-muted-foreground"
+                placeholder="Write your message…"
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+              />
+            </div>
+
+            {/* Attachments */}
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {attachments.map((a, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-muted border border-border max-w-[200px]"
+                  >
+                    <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{a.name}</span>
+                    <button
+                      type="button"
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex items-center justify-between pt-1">
+              <div className="flex items-center gap-2">
+                <input ref={attachFileRef} type="file" className="hidden" onChange={handleAttachFile} />
+                <button
+                  type="button"
+                  disabled={uploadingFile || sending}
+                  onClick={() => attachFileRef.current?.click()}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
+                  title="Attach file"
+                >
+                  {uploadingFile ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Paperclip className="h-4 w-4" />
+                  )}
+                </button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={sending || !body.trim()}
+                  onClick={() => setPreviewing(true)}
+                  className="h-7 px-3 text-xs"
+                >
+                  Preview
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={handleClose} disabled={sending}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={handleSend}
+                  disabled={sending || !fromEmail || !toEmail || !body.trim()}
+                >
+                  {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                  {sending ? "Sending…" : "Send"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
