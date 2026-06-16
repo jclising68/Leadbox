@@ -25,6 +25,8 @@ import {
   Globe,
   Filter,
   Info,
+  AlertTriangle,
+  Ban,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -36,6 +38,14 @@ type ReportData = {
   topTitles: { title: string; replies: number }[];
   stepPerformance: { step: string; replies: number }[];
   labelDistribution: { label: string; count: number; color: string }[];
+};
+
+type BounceData = {
+  summary: { totalBounced: number; totalUnsubscribed: number; total: number };
+  byCampaign: { name: string; count: number }[];
+  byDomain: { domain: string; count: number }[];
+  leads: { email: string; company: string; campaign: string; reason: "Bounced" | "Unsubscribed"; date: string | null }[];
+  insight: string[] | null;
 };
 
 type SourceFilter = "all" | "EMAIL" | "LINKEDIN";
@@ -372,6 +382,8 @@ export default function ReportingPage() {
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bounceData, setBounceData] = useState<BounceData | null>(null);
+  const [bounceLoading, setBounceLoading] = useState(false);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -392,6 +404,19 @@ export default function ReportingPage() {
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   }, [workspaceId, selectedMonth, source, selectedLabel]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    setBounceLoading(true);
+    const params = new URLSearchParams({ month: selectedMonth });
+    fetch(`/api/reporting/bounces?${params}`, {
+      headers: { "x-workspace-id": workspaceId },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: BounceData | null) => setBounceData(d))
+      .catch(() => setBounceData(null))
+      .finally(() => setBounceLoading(false));
+  }, [workspaceId, selectedMonth]);
 
   const labelList = (labels as { id: string; name: string }[]);
 
@@ -685,6 +710,226 @@ export default function ReportingPage() {
                 </>
               )}
             </SectionCard>
+          </div>
+
+          {/* Deliverability Health */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="px-5 pt-5 pb-4 border-b border-border/60 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Deliverability Health</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Bounced leads and unsubscribes detected this period</p>
+              </div>
+            </div>
+
+            {bounceLoading && (
+              <div className="flex items-center justify-center py-12 gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                <p className="text-xs text-muted-foreground">Loading…</p>
+              </div>
+            )}
+
+            {!bounceLoading && bounceData && (
+              <div className="p-5 space-y-5">
+                {/* Stat row */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-border bg-background p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Bounced</p>
+                      <div className="rounded-lg p-2" style={{ backgroundColor: "#ef444418" }}>
+                        <Ban className="h-3.5 w-3.5" style={{ color: "#ef4444" }} />
+                      </div>
+                    </div>
+                    <p className="text-3xl font-bold leading-none tracking-tight text-foreground">
+                      {bounceData.summary.totalBounced}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-2">Email bounces this period</p>
+                  </div>
+
+                  <div className="rounded-xl border border-border bg-background p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Unsubscribed</p>
+                      <div className="rounded-lg p-2" style={{ backgroundColor: "#f9731618" }}>
+                        <AlertTriangle className="h-3.5 w-3.5" style={{ color: "#f97316" }} />
+                      </div>
+                    </div>
+                    <p className="text-3xl font-bold leading-none tracking-tight text-foreground">
+                      {bounceData.summary.totalUnsubscribed}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-2">Opted out this period</p>
+                  </div>
+                </div>
+
+                {/* AI Action Items */}
+                {bounceData.insight && bounceData.insight.length > 0 && (
+                  <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+                    <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 mb-2">Suggested actions</p>
+                    <ul className="space-y-1.5">
+                      {bounceData.insight.map((item, i) => (
+                        <li key={i} className="flex items-start gap-2 text-xs text-foreground leading-relaxed">
+                          <span className="mt-0.5 h-4 w-4 shrink-0 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center text-[10px] font-bold">
+                            {i + 1}
+                          </span>
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Charts row */}
+                {bounceData.summary.total > 0 ? (
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* By Campaign */}
+                    <div>
+                      <p className="text-xs font-medium text-foreground mb-3">By Campaign</p>
+                      {bounceData.byCampaign.length === 0 ? (
+                        <EmptyChart />
+                      ) : (
+                        <ResponsiveContainer width="100%" height={Math.max(140, bounceData.byCampaign.length * 40)}>
+                          <BarChart
+                            data={bounceData.byCampaign}
+                            layout="vertical"
+                            margin={{ top: 0, right: 20, bottom: 0, left: 4 }}
+                            barCategoryGap="35%"
+                          >
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" />
+                            <XAxis
+                              type="number"
+                              tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                              axisLine={false}
+                              tickLine={false}
+                              allowDecimals={false}
+                            />
+                            <YAxis
+                              type="category"
+                              dataKey="name"
+                              width={140}
+                              tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                              axisLine={false}
+                              tickLine={false}
+                              tickFormatter={(v: string) => (v.length > 20 ? v.slice(0, 18) + "…" : v)}
+                            />
+                            <Tooltip
+                              content={<ChartTooltip />}
+                              cursor={{ fill: "var(--accent)", opacity: 0.35 }}
+                            />
+                            <Bar dataKey="count" fill="#ef4444" radius={[0, 5, 5, 0]} name="Issues" />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+
+                    {/* By Domain */}
+                    <div>
+                      <p className="text-xs font-medium text-foreground mb-3">By Domain</p>
+                      {bounceData.byDomain.length === 0 ? (
+                        <EmptyChart />
+                      ) : (
+                        <ResponsiveContainer width="100%" height={Math.max(140, bounceData.byDomain.length * 40)}>
+                          <BarChart
+                            data={bounceData.byDomain}
+                            layout="vertical"
+                            margin={{ top: 0, right: 20, bottom: 0, left: 4 }}
+                            barCategoryGap="35%"
+                          >
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" />
+                            <XAxis
+                              type="number"
+                              tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                              axisLine={false}
+                              tickLine={false}
+                              allowDecimals={false}
+                            />
+                            <YAxis
+                              type="category"
+                              dataKey="domain"
+                              width={140}
+                              tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                              axisLine={false}
+                              tickLine={false}
+                              tickFormatter={(v: string) => (v.length > 20 ? v.slice(0, 18) + "…" : v)}
+                            />
+                            <Tooltip
+                              content={<ChartTooltip />}
+                              cursor={{ fill: "var(--accent)", opacity: 0.35 }}
+                            />
+                            <Bar dataKey="count" fill="#f97316" radius={[0, 5, 5, 0]} name="Issues" />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-8 gap-2">
+                    <div className="h-10 w-10 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                      <TrendingUp className="h-4 w-4 text-emerald-500" />
+                    </div>
+                    <p className="text-sm font-medium text-foreground">All clear this period</p>
+                    <p className="text-xs text-muted-foreground text-center">No bounces or unsubscribes detected.</p>
+                  </div>
+                )}
+
+                {/* Lead table */}
+                {bounceData.leads.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-foreground mb-2">Affected Leads</p>
+                    <div className="rounded-lg border border-border overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-border bg-muted/40">
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Email</th>
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Company</th>
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Campaign</th>
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Reason</th>
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Detected</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {bounceData.leads.map((lead, i) => (
+                            <tr
+                              key={i}
+                              className="border-b border-border/50 last:border-0 hover:bg-muted/20 transition-colors"
+                            >
+                              <td className="px-3 py-2 text-foreground font-medium truncate max-w-[160px]">
+                                {lead.email || "—"}
+                              </td>
+                              <td className="px-3 py-2 text-muted-foreground truncate max-w-[120px]">
+                                {lead.company || "—"}
+                              </td>
+                              <td className="px-3 py-2 text-muted-foreground truncate max-w-[160px]">
+                                {lead.campaign || "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span
+                                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                    lead.reason === "Bounced"
+                                      ? "bg-red-500/10 text-red-500"
+                                      : "bg-orange-500/10 text-orange-500"
+                                  }`}
+                                >
+                                  {lead.reason}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
+                                {lead.date
+                                  ? new Date(lead.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                                  : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {bounceData.leads.length === 50 && (
+                        <p className="text-[10px] text-muted-foreground text-center py-2 border-t border-border/50">
+                          Showing most recent 50 — export for full list
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Coming soon footer */}
