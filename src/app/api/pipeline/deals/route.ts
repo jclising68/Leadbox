@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
+import { logActivity } from "@/services/lead-activity";
 
 const DEAL_SELECT = {
   id: true,
@@ -80,8 +81,14 @@ export async function POST(req: NextRequest) {
         prospectId: prospectId ?? null,
         threadId: threadId ?? null,
       },
-      select: DEAL_SELECT,
+      select: {
+        ...DEAL_SELECT,
+        pipeline: { select: { name: true } },
+        stage: { select: { name: true } },
+      },
     });
+
+    logActivity(workspaceId!, deal.threadId ?? null, deal.prospectId ?? null, "pipeline_added", { pipeline: deal.pipeline.name, stage: deal.stage.name });
 
     return NextResponse.json(deal, { status: 201 });
   } catch (e) {

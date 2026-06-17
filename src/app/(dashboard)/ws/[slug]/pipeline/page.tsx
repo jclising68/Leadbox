@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useId } from "react";
+import { useState, useRef, useId, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,11 @@ import {
   ExternalLink,
   X,
   Check,
+  Tag,
+  Clock,
+  Send,
+  GitBranch,
+  ArrowRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouter, useParams } from "next/navigation";
@@ -87,6 +92,127 @@ function formatValue(v: number | null) {
 function prospectName(p: Deal["prospect"]) {
   if (!p) return null;
   return [p.firstName, p.lastName].filter(Boolean).join(" ").trim() || p.email || null;
+}
+
+// ─── Activity Feed ────────────────────────────────────────────────────────────
+
+type ActivityEvent = {
+  id: string;
+  type:
+    | "label_applied"
+    | "label_removed"
+    | "follow_up_scheduled"
+    | "follow_up_cleared"
+    | "reply_sent"
+    | "pipeline_added"
+    | "pipeline_moved"
+    | "pipeline_removed";
+  metadata: Record<string, string | null>;
+  createdAt: string;
+};
+
+function formatRelative(iso: string): string {
+  const now = Date.now();
+  const then = new Date(iso).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHr / 24);
+
+  if (diffSec < 60) return "just now";
+  if (diffMin < 60) return `${diffMin} minute${diffMin !== 1 ? "s" : ""} ago`;
+  if (diffHr < 24) return `${diffHr} hour${diffHr !== 1 ? "s" : ""} ago`;
+  if (diffDay < 7) return `${diffDay} day${diffDay !== 1 ? "s" : ""} ago`;
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function ActivityFeed({ activities, loading }: { activities: ActivityEvent[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-6">
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (activities.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground text-center py-4">
+        No activity yet for this lead.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      {activities.map((event) => {
+        let Icon: React.ElementType = Tag;
+        let dotColor = "bg-muted-foreground";
+        let description = "";
+
+        switch (event.type) {
+          case "label_applied":
+            Icon = Tag;
+            dotColor = "bg-green-500";
+            description = `Tagged: ${event.metadata.label ?? ""}`;
+            break;
+          case "label_removed":
+            Icon = Tag;
+            dotColor = "bg-muted-foreground";
+            description = `Label removed: ${event.metadata.label ?? ""}`;
+            break;
+          case "follow_up_scheduled": {
+            Icon = Clock;
+            dotColor = "bg-amber-500";
+            const d = event.metadata.date
+              ? new Date(event.metadata.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+              : "";
+            description = `Follow-up scheduled${d ? ` for ${d}` : ""}`;
+            break;
+          }
+          case "follow_up_cleared":
+            Icon = Clock;
+            dotColor = "bg-muted-foreground";
+            description = "Follow-up cleared";
+            break;
+          case "reply_sent":
+            Icon = Send;
+            dotColor = "bg-blue-500";
+            description = "You replied";
+            break;
+          case "pipeline_added":
+            Icon = GitBranch;
+            dotColor = "bg-purple-500";
+            description = `Added to ${event.metadata.pipeline ?? ""} → ${event.metadata.stage ?? ""}`;
+            break;
+          case "pipeline_moved":
+            Icon = ArrowRight;
+            dotColor = "bg-purple-500";
+            description = `Moved: ${event.metadata.fromStage ?? ""} → ${event.metadata.toStage ?? ""} in ${event.metadata.pipeline ?? ""}`;
+            break;
+          case "pipeline_removed":
+            Icon = X;
+            dotColor = "bg-muted-foreground";
+            description = `Removed from ${event.metadata.pipeline ?? ""}`;
+            break;
+        }
+
+        return (
+          <div key={event.id} className="flex items-center gap-3 py-2 border-b border-border/50 last:border-0">
+            <div className="relative shrink-0">
+              <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className={cn("absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full", dotColor)} />
+            </div>
+            <p className="text-xs text-foreground flex-1 leading-snug">{description}</p>
+            <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+              {formatRelative(event.createdAt)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 // ─── Stage row inside Create Pipeline dialog ──────────────────────────────────
@@ -371,6 +497,7 @@ function DealDialog({
   initial,
   defaultStageId,
   isPending,
+  workspaceId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -379,11 +506,14 @@ function DealDialog({
   initial?: Deal | null;
   defaultStageId?: string;
   isPending: boolean;
+  workspaceId: string | null | undefined;
 }) {
   const [title, setTitle] = useState("");
   const [stageId, setStageId] = useState("");
   const [notes, setNotes] = useState("");
   const [value, setValue] = useState("");
+  const [activities, setActivities] = useState<ActivityEvent[]>([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(false);
 
   const prevOpen = useRef(false);
   if (open && !prevOpen.current) {
@@ -396,6 +526,25 @@ function DealDialog({
     }, 0);
   }
   if (!open) prevOpen.current = false;
+
+  // Fetch activity when dialog opens and deal has a threadId
+  useEffect(() => {
+    if (!open || !initial?.threadId || !workspaceId) return;
+    let cancelled = false;
+    setActivitiesLoading(true);
+    fetch(`/api/threads/${initial.threadId}/activity`, {
+      headers: { "x-workspace-id": workspaceId },
+    })
+      .then((res) => (res.ok ? (res.json() as Promise<ActivityEvent[]>) : Promise.resolve([])))
+      .catch(() => [])
+      .then((data) => {
+        if (!cancelled) {
+          setActivities(data);
+          setActivitiesLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [open, initial?.threadId, workspaceId]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -433,6 +582,15 @@ function DealDialog({
               placeholder="Optional notes..."
             />
           </div>
+
+          {/* Activity section — only shown when deal is linked to a thread */}
+          {initial?.threadId && (
+            <div className="border-t border-border pt-4 mt-2">
+              <p className="text-xs font-semibold text-foreground mb-3">Activity</p>
+              <ActivityFeed activities={activities} loading={activitiesLoading} />
+            </div>
+          )}
+
           <div className="flex gap-2 pt-1">
             <Button variant="ghost" onClick={onClose} className="flex-1">Cancel</Button>
             <Button
@@ -1010,6 +1168,7 @@ export default function PipelinePage() {
           initial={editingDeal}
           defaultStageId={defaultStageId}
           isPending={createDeal.isPending || updateDeal.isPending}
+          workspaceId={workspaceId}
         />
       )}
     </div>

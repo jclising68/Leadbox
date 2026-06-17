@@ -147,6 +147,7 @@ export function useAddLabel() {
       queryClient.invalidateQueries({ queryKey: ["thread"] });
       queryClient.invalidateQueries({ queryKey: ["labels"] });
       queryClient.invalidateQueries({ queryKey: ["prospects"] });
+      queryClient.invalidateQueries({ queryKey: ["activities"] });
       reportProviderSync(data.providerSync);
     },
   });
@@ -171,6 +172,7 @@ export function useRemoveLabel() {
       queryClient.invalidateQueries({ queryKey: ["thread"] });
       queryClient.invalidateQueries({ queryKey: ["labels"] });
       queryClient.invalidateQueries({ queryKey: ["prospects"] });
+      queryClient.invalidateQueries({ queryKey: ["activities"] });
       reportProviderSync(data.providerSync);
     },
   });
@@ -201,6 +203,7 @@ export function useSetFollowUp() {
       queryClient.invalidateQueries({ queryKey: ["thread"] });
       queryClient.invalidateQueries({ queryKey: ["labels"] });
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["activities"] });
     },
   });
 }
@@ -235,6 +238,7 @@ export function useSendReply() {
     onSuccess: (_data, { threadId }) => {
       queryClient.invalidateQueries({ queryKey: ["thread", threadId] });
       queryClient.invalidateQueries({ queryKey: ["threads"] });
+      queryClient.invalidateQueries({ queryKey: ["activities"] });
     },
   });
 }

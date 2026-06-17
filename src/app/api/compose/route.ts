@@ -5,6 +5,7 @@ import { decrypt } from "@/lib/crypto";
 import nodemailer from "nodemailer";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { logActivity } from "@/services/lead-activity";
 
 type Attachment = { name: string; url: string; type: string };
 
@@ -129,6 +130,8 @@ export async function POST(req: NextRequest) {
         throw err;
       }
     }
+
+    logActivity(workspaceId!, thread.id, prospect.id, "reply_sent", { subject: subject || "(no subject)" });
 
     // If thread had a followUpAt, clear it and remove the Follow Up pipeline deal
     if (thread.followUpAt) {

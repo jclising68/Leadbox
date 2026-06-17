@@ -57,6 +57,9 @@ import {
   Paperclip,
   CalendarClock,
   Milestone,
+  Clock,
+  GitBranch,
+  ArrowRight,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -104,6 +107,125 @@ function ProviderBadge({ provider }: { provider?: string | null }) {
   );
 }
 
+// ─── Activity Feed ────────────────────────────────────────────────────────────
+
+type ActivityEvent = {
+  id: string;
+  type:
+    | "label_applied"
+    | "label_removed"
+    | "follow_up_scheduled"
+    | "follow_up_cleared"
+    | "reply_sent"
+    | "pipeline_added"
+    | "pipeline_moved"
+    | "pipeline_removed";
+  metadata: Record<string, string | null>;
+  createdAt: string;
+};
+
+function formatRelative(iso: string): string {
+  const now = Date.now();
+  const then = new Date(iso).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHr / 24);
+
+  if (diffSec < 60) return "just now";
+  if (diffMin < 60) return `${diffMin} minute${diffMin !== 1 ? "s" : ""} ago`;
+  if (diffHr < 24) return `${diffHr} hour${diffHr !== 1 ? "s" : ""} ago`;
+  if (diffDay < 7) return `${diffDay} day${diffDay !== 1 ? "s" : ""} ago`;
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function ActivityFeed({ activities, loading }: { activities: ActivityEvent[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (activities.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground text-center py-8">
+        No activity yet for this lead.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {activities.map((event) => {
+        let Icon: React.ElementType = Tag;
+        let dotClass = "bg-muted-foreground";
+        let description = "";
+
+        switch (event.type) {
+          case "label_applied":
+            Icon = Tag;
+            dotClass = "bg-green-500";
+            description = `Tagged: ${event.metadata.label ?? ""}`;
+            break;
+          case "label_removed":
+            Icon = Tag;
+            dotClass = "bg-muted-foreground";
+            description = `Label removed: ${event.metadata.label ?? ""}`;
+            break;
+          case "follow_up_scheduled": {
+            Icon = Clock;
+            dotClass = "bg-amber-500";
+            const d = event.metadata.date ? new Date(event.metadata.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+            description = `Follow-up scheduled${d ? ` for ${d}` : ""}`;
+            break;
+          }
+          case "follow_up_cleared":
+            Icon = Clock;
+            dotClass = "bg-muted-foreground";
+            description = "Follow-up cleared";
+            break;
+          case "reply_sent":
+            Icon = Send;
+            dotClass = "bg-blue-500";
+            description = "You replied";
+            break;
+          case "pipeline_added":
+            Icon = GitBranch;
+            dotClass = "bg-purple-500";
+            description = `Added to ${event.metadata.pipeline ?? ""} → ${event.metadata.stage ?? ""}`;
+            break;
+          case "pipeline_moved":
+            Icon = ArrowRight;
+            dotClass = "bg-purple-500";
+            description = `Moved: ${event.metadata.fromStage ?? ""} → ${event.metadata.toStage ?? ""} in ${event.metadata.pipeline ?? ""}`;
+            break;
+          case "pipeline_removed":
+            Icon = X;
+            dotClass = "bg-muted-foreground";
+            description = `Removed from ${event.metadata.pipeline ?? ""}`;
+            break;
+        }
+
+        return (
+          <div key={event.id} className="flex items-center gap-3 py-2 border-b border-border/50 last:border-0">
+            <div className="relative shrink-0">
+              <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className={cn("absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full", dotClass)} />
+            </div>
+            <p className="text-xs text-foreground flex-1 leading-snug">{description}</p>
+            <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+              {formatRelative(event.createdAt)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ThreadDetail() {
   const { selectedThreadId, setSelectedThread } = useInboxStore();
   const workspaceId = useCurrentWorkspaceId();
@@ -133,6 +255,7 @@ export function ThreadDetail() {
   const [followUpDrafting, setFollowUpDrafting] = useState(false);
   const [redrafting, setRedrafting] = useState(false);
   const [draftDismissed, setDraftDismissed] = useState(false);
+  const [activeTab, setActiveTab] = useState<"messages" | "activity">("messages");
 
   // Fetch AI draft for the current thread
   const { data: aiDraft } = useQuery({
@@ -184,7 +307,23 @@ export function ThreadDetail() {
     setDraftApplied(false);
     setDraftDismissed(false);
     setAttachments([]);
+    setActiveTab("messages");
   }, [selectedThreadId]);
+
+  // Fetch activity — React Query so it auto-refreshes after label/reply/follow-up actions
+  const { data: activities = [], isLoading: activitiesLoading } = useQuery<ActivityEvent[]>({
+    queryKey: ["activities", selectedThreadId],
+    queryFn: async () => {
+      if (!workspaceId || !selectedThreadId) return [];
+      const res = await fetch(`/api/threads/${selectedThreadId}/activity`, {
+        headers: { "x-workspace-id": workspaceId },
+      });
+      if (!res.ok) return [];
+      return res.json() as Promise<ActivityEvent[]>;
+    },
+    enabled: !!workspaceId && !!selectedThreadId && activeTab === "activity",
+    staleTime: 0,
+  });
 
   // Mark as read when viewing
   useEffect(() => {
@@ -560,7 +699,24 @@ export function ThreadDetail() {
           </div>
         </div>
 
+        {/* Tab bar */}
+        <div className="flex items-center gap-1 px-4 pt-3 pb-0 border-b border-border bg-card">
+          <button
+            onClick={() => setActiveTab("messages")}
+            className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${activeTab === "messages" ? "text-foreground border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Messages
+          </button>
+          <button
+            onClick={() => setActiveTab("activity")}
+            className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${activeTab === "activity" ? "text-foreground border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Activity
+          </button>
+        </div>
+
         {/* Scrollable messages area */}
+        {activeTab === "messages" && (
         <div className="flex-1 overflow-y-auto min-h-0">
           <div className="px-6 py-4 space-y-6 max-w-3xl">
             {thread.messages?.map(
@@ -691,6 +847,14 @@ export function ThreadDetail() {
             <div ref={messagesEndRef} />
           </div>
         </div>
+        )}
+
+        {/* Activity panel */}
+        {activeTab === "activity" && (
+          <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4">
+            <ActivityFeed activities={activities} loading={activitiesLoading} />
+          </div>
+        )}
 
         {/* Reply composer */}
         <div className="border-t border-border bg-card/40 px-4 py-3 shrink-0">

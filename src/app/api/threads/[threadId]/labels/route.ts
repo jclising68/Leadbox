@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { syncProviderTags } from "@/services/provider-tags";
 import { fireOutboundWebhooks } from "@/services/outbound-webhooks";
+import { logActivity } from "@/services/lead-activity";
 
 /**
  * Local DB op + provider push are awaited inline (not via `after()`) so the
@@ -64,7 +65,11 @@ export async function POST(
     });
   }
 
-  const providerSync = await syncProviderTags(workspaceId!, threadId);
+  // Provider sync — fire-and-forget so the UI updates immediately without
+  // waiting for 4-5 sequential Instantly API calls (~5-10s).
+  syncProviderTags(workspaceId!, threadId).catch((err) =>
+    console.error("[thread labels POST] provider sync failed:", err)
+  );
 
   // Fire outbound webhook — fire-and-forget, never blocks the response
   if (thread.prospect) {
@@ -96,7 +101,9 @@ export async function POST(
     ).catch((err) => console.error("[thread labels POST] outbound webhook failed:", err));
   }
 
-  return NextResponse.json({ ...threadLabel, providerSync });
+  logActivity(workspaceId!, threadId, thread.prospectId ?? null, "label_applied", { label: label.name, color: label.color ?? null });
+
+  return NextResponse.json({ ...threadLabel });
 }
 
 export async function DELETE(
@@ -109,10 +116,16 @@ export async function DELETE(
   const { threadId } = await params;
   const { labelId } = await req.json();
 
-  const thread = await prisma.thread.findFirst({
-    where: { id: threadId, workspaceId: workspaceId! },
-    select: { id: true, prospectId: true },
-  });
+  const [thread, removedLabel] = await Promise.all([
+    prisma.thread.findFirst({
+      where: { id: threadId, workspaceId: workspaceId! },
+      select: { id: true, prospectId: true },
+    }),
+    prisma.label.findFirst({
+      where: { id: labelId, workspaceId: workspaceId! },
+      select: { name: true },
+    }),
+  ]);
   if (!thread) {
     return NextResponse.json({ error: "Thread not found" }, { status: 404 });
   }
@@ -135,7 +148,13 @@ export async function DELETE(
     });
   }
 
-  const providerSync = await syncProviderTags(workspaceId!, threadId);
+  syncProviderTags(workspaceId!, threadId).catch((err) =>
+    console.error("[thread labels DELETE] provider sync failed:", err)
+  );
 
-  return NextResponse.json({ success: true, providerSync });
+  if (removedLabel) {
+    logActivity(workspaceId!, threadId, thread.prospectId ?? null, "label_removed", { label: removedLabel.name });
+  }
+
+  return NextResponse.json({ success: true });
 }

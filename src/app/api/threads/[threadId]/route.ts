@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { workspaceJson } from "@/lib/api-response";
+import { logActivity } from "@/services/lead-activity";
 
 export async function GET(
   req: NextRequest,
@@ -124,6 +125,7 @@ export async function PATCH(
     autoCreateFollowUpDeal(threadId, workspaceId!).catch((err) =>
       console.error("[thread PATCH] autoCreateFollowUpDeal failed", err)
     );
+    logActivity(workspaceId!, threadId, null, "follow_up_scheduled", { date: data.followUpAt instanceof Date ? (data.followUpAt as Date).toISOString() : null });
   }
 
   // Auto-remove the PipelineDeal when followUpAt is manually cleared
@@ -131,6 +133,7 @@ export async function PATCH(
     removeFollowUpDeal(threadId, workspaceId!).catch((err) =>
       console.error("[thread PATCH] removeFollowUpDeal failed", err)
     );
+    logActivity(workspaceId!, threadId, null, "follow_up_cleared", {});
   }
 
   return NextResponse.json({ success: true });
@@ -203,6 +206,8 @@ async function autoCreateFollowUpDeal(threadId: string, workspaceId: string) {
       title,
     },
   });
+
+  logActivity(workspaceId, threadId, threadRow.prospectId ?? null, "pipeline_added", { pipeline: pipeline.name, stage: stage.name });
 }
 
 /**
