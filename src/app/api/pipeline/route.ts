@@ -37,16 +37,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Pipeline name is required" }, { status: 400 });
     }
 
+    const userStages = (stages ?? []).map((s, i) => ({
+      name: s.name.trim(),
+      color: s.color ?? "#6B7280",
+      sortOrder: i,
+    }));
+
+    // Always append a "Follow Up" stage as the last stage
+    const followUpStage = {
+      name: "Follow Up",
+      color: "#f59e0b",
+      sortOrder: userStages.length,
+    };
+
     const pipeline = await prisma.pipeline.create({
       data: {
         workspaceId: workspaceId!,
         name: name.trim(),
         stages: {
-          create: (stages ?? []).map((s, i) => ({
-            name: s.name.trim(),
-            color: s.color ?? "#6B7280",
-            sortOrder: i,
-          })),
+          create: [...userStages, followUpStage],
         },
       },
       include: {

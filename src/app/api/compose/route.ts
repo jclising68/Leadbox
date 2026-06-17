@@ -130,6 +130,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // If thread had a followUpAt, clear it and remove the Follow Up pipeline deal
+    if (thread.followUpAt) {
+      await Promise.all([
+        prisma.thread.update({
+          where: { id: thread.id },
+          data: { followUpAt: null },
+        }),
+        prisma.pipelineDeal.deleteMany({
+          where: {
+            threadId: thread.id,
+            workspaceId: workspaceId!,
+            stage: { name: "Follow Up" },
+          },
+        }),
+      ]);
+    }
+
     return NextResponse.json({ success: true, threadId: thread.id });
   } catch (err) {
     console.error("[compose]", err instanceof Error ? err.message : err);

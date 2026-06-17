@@ -77,9 +77,12 @@ export async function PATCH(
 
   // followUpAt is an ISO string, null to clear, or undefined to skip
   let applyFollowUpLabel = false;
+  let followUpBeingSet = false;
+  let followUpBeingCleared = false;
   if (body.followUpAt !== undefined) {
     if (body.followUpAt === null) {
       data.followUpAt = null;
+      followUpBeingCleared = true;
     } else {
       const date = new Date(body.followUpAt);
       if (isNaN(date.getTime())) {
@@ -88,6 +91,7 @@ export async function PATCH(
       data.followUpAt = date;
       data.followUpSlackSentAt = null;
       applyFollowUpLabel = true;
+      followUpBeingSet = true;
     }
   }
 
@@ -115,7 +119,103 @@ export async function PATCH(
     }
   }
 
+  // Auto-create a PipelineDeal in the "Follow Up" stage when followUpAt is set
+  if (followUpBeingSet) {
+    autoCreateFollowUpDeal(threadId, workspaceId!).catch((err) =>
+      console.error("[thread PATCH] autoCreateFollowUpDeal failed", err)
+    );
+  }
+
+  // Auto-remove the PipelineDeal when followUpAt is manually cleared
+  if (followUpBeingCleared) {
+    removeFollowUpDeal(threadId, workspaceId!).catch((err) =>
+      console.error("[thread PATCH] removeFollowUpDeal failed", err)
+    );
+  }
+
   return NextResponse.json({ success: true });
+}
+
+// ─── Pipeline helpers ────────────────────────────────────────────────────────
+
+/**
+ * When followUpAt is set on a thread, upsert a PipelineDeal in the workspace's
+ * first pipeline's "Follow Up" stage. If that stage doesn't exist yet (legacy
+ * pipeline), create it lazily. Idempotent: skips if a deal for this thread
+ * already exists in a "Follow Up" stage.
+ */
+async function autoCreateFollowUpDeal(threadId: string, workspaceId: string) {
+  // Fetch the thread to get prospectId and prospect name
+  const threadRow = await prisma.thread.findFirst({
+    where: { id: threadId, workspaceId },
+    select: {
+      prospectId: true,
+      prospect: { select: { firstName: true, lastName: true, email: true } },
+    },
+  });
+  if (!threadRow) return;
+
+  // Check if a deal already exists for this thread in any "Follow Up" stage
+  const existingDeal = await prisma.pipelineDeal.findFirst({
+    where: {
+      threadId,
+      workspaceId,
+      stage: { name: "Follow Up" },
+    },
+    select: { id: true },
+  });
+  if (existingDeal) return;
+
+  // Find the oldest pipeline for this workspace
+  const pipeline = await prisma.pipeline.findFirst({
+    where: { workspaceId },
+    orderBy: { createdAt: "asc" },
+    include: { stages: { select: { id: true, name: true, sortOrder: true } } },
+  });
+  if (!pipeline) return;
+
+  // Find or lazily create the "Follow Up" stage
+  let stage = pipeline.stages.find((s) => s.name === "Follow Up");
+  if (!stage) {
+    const maxSortOrder = pipeline.stages.reduce((max, s) => Math.max(max, s.sortOrder), -1);
+    stage = await prisma.pipelineStage.create({
+      data: {
+        pipelineId: pipeline.id,
+        name: "Follow Up",
+        color: "#f59e0b",
+        sortOrder: maxSortOrder + 1,
+      },
+    });
+  }
+
+  // Build deal title: firstName+lastName, or email, or fallback
+  const { firstName, lastName, email } = threadRow.prospect;
+  const nameParts = [firstName, lastName].filter(Boolean).join(" ").trim();
+  const title = nameParts || email || "Follow Up";
+
+  await prisma.pipelineDeal.create({
+    data: {
+      workspaceId,
+      pipelineId: pipeline.id,
+      stageId: stage.id,
+      prospectId: threadRow.prospectId,
+      threadId,
+      title,
+    },
+  });
+}
+
+/**
+ * Delete all PipelineDeals for this thread that are in a "Follow Up" stage.
+ */
+async function removeFollowUpDeal(threadId: string, workspaceId: string) {
+  await prisma.pipelineDeal.deleteMany({
+    where: {
+      threadId,
+      workspaceId,
+      stage: { name: "Follow Up" },
+    },
+  });
 }
 
 export async function DELETE(

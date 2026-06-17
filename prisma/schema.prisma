@@ -97,8 +97,9 @@ model Workspace {
   apiKeys           WorkspaceApiKey[]
   aiDrafts          AiDraft[]
   smtpChannels      SmtpChannel[]
-  outboundWebhooks  OutboundWebhook[]
-  pipelines         Pipeline[]
+  outboundWebhooks          OutboundWebhook[]
+  outboundWebhookDeliveries OutboundWebhookDelivery[]
+  pipelines                 Pipeline[]
   pipelineDeals     PipelineDeal[]
 }
 
@@ -426,6 +427,20 @@ model OutboundWebhook {
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
+}
+
+model OutboundWebhookDelivery {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  webhookUrl   String
+  event        String
+  statusCode   Int?
+  success      Boolean
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
 }
 
 // ─── PIPELINE ─────────────────────────────────────────

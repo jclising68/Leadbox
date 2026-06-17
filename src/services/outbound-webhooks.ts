@@ -22,6 +22,30 @@ interface OutboundPayload {
   timestamp: string;
 }
 
+async function logDelivery(
+  workspaceId: string,
+  webhookUrl: string,
+  event: string,
+  success: boolean,
+  statusCode?: number,
+  errorMessage?: string
+): Promise<void> {
+  try {
+    await prisma.outboundWebhookDelivery.create({
+      data: {
+        workspaceId,
+        webhookUrl,
+        event,
+        success,
+        statusCode: statusCode ?? null,
+        errorMessage: errorMessage ? errorMessage.slice(0, 500) : null,
+      },
+    });
+  } catch {
+    // Never let logging failures surface to callers
+  }
+}
+
 export async function fireOutboundWebhooks(
   workspaceId: string,
   payload: OutboundPayload
@@ -55,16 +79,49 @@ export async function fireOutboundWebhooks(
       ? (({ label: _label, ...rest }) => ({ ...rest, event: _label }))(payload)
       : payload;
 
+  // The event name to log (for lead_tagged, use the label value as the event string)
+  const loggedEvent =
+    payload.event === "lead_tagged" && payload.label
+      ? payload.label
+      : payload.event;
+
   await Promise.allSettled(
-    matching.map((h) => {
+    matching.map(async (h) => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 10_000);
-      return fetch(h.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(outgoing),
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timer));
+      try {
+        const response = await fetch(h.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(outgoing),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+
+        if (!response.ok) {
+          let body = "";
+          try {
+            body = await response.text();
+          } catch {
+            // ignore
+          }
+          await logDelivery(
+            workspaceId,
+            h.url,
+            loggedEvent,
+            false,
+            response.status,
+            body || `HTTP ${response.status}`
+          );
+        } else {
+          await logDelivery(workspaceId, h.url, loggedEvent, true, response.status);
+        }
+      } catch (err) {
+        clearTimeout(timer);
+        const errorMessage =
+          err instanceof Error ? err.message : "Unknown error";
+        await logDelivery(workspaceId, h.url, loggedEvent, false, undefined, errorMessage);
+      }
     })
   );
 }

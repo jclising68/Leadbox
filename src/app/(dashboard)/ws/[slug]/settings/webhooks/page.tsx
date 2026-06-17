@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useLabels } from "@/hooks/use-labels";
-import { Loader2, Plus, Trash2, ToggleLeft, ToggleRight, Send } from "lucide-react";
+import { Loader2, Plus, Trash2, ToggleLeft, ToggleRight, Send, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -63,6 +63,16 @@ type WebhookLog = {
   errorMessage: string | null;
 };
 
+type DeliveryLog = {
+  id: string;
+  webhookUrl: string;
+  event: string;
+  statusCode: number | null;
+  success: boolean;
+  errorMessage: string | null;
+  createdAt: string;
+};
+
 const statusColor: Record<string, string> = {
   PROCESSED: "text-green-500 border-green-500",
   PENDING: "text-yellow-500 border-yellow-500",
@@ -73,7 +83,7 @@ const statusColor: Record<string, string> = {
 export default function WebhooksPage() {
   const workspaceId = useCurrentWorkspaceId();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"outbound" | "logs">("outbound");
+  const [tab, setTab] = useState<"outbound" | "logs" | "delivery">("outbound");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [newUrl, setNewUrl] = useState("");
@@ -106,6 +116,19 @@ export default function WebhooksPage() {
     },
     enabled: !!workspaceId && tab === "logs",
     refetchInterval: tab === "logs" ? 15000 : false,
+  });
+
+  const { data: deliveries = [], isLoading: deliveriesLoading } = useQuery<DeliveryLog[]>({
+    queryKey: ["outbound-webhook-deliveries", workspaceId],
+    queryFn: async () => {
+      const res = await fetch("/api/outbound-webhooks/deliveries", {
+        headers: { "x-workspace-id": workspaceId! },
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!workspaceId && tab === "delivery",
+    refetchInterval: tab === "delivery" ? 15000 : false,
   });
 
   const createMutation = useMutation({
@@ -179,6 +202,8 @@ export default function WebhooksPage() {
         throw new Error(err.error || "Failed");
       }
       toast.success("Test payload sent");
+      // Refresh delivery logs if on that tab
+      queryClient.invalidateQueries({ queryKey: ["outbound-webhook-deliveries", workspaceId] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to send test");
     } finally {
@@ -199,7 +224,7 @@ export default function WebhooksPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-border">
-        {(["outbound", "logs"] as const).map((t) => (
+        {(["outbound", "logs", "delivery"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -210,7 +235,7 @@ export default function WebhooksPage() {
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
-            {t === "outbound" ? "Outbound Webhooks" : "Incoming Logs"}
+            {t === "outbound" ? "Outbound Webhooks" : t === "logs" ? "Incoming Logs" : "Delivery Logs"}
           </button>
         ))}
       </div>
@@ -352,6 +377,76 @@ export default function WebhooksPage() {
                   {log.errorMessage && (
                     <span className="text-xs text-muted-foreground truncate flex-1 min-w-0">
                       {log.errorMessage}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === "delivery" && (
+        <>
+          <p className="text-xs text-muted-foreground mb-4">
+            Shows the last 100 outbound webhook delivery attempts. Auto-refreshes every 15s.
+          </p>
+          {deliveriesLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : deliveries.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">
+              No outbound deliveries yet. Deliveries are logged when a webhook fires.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {deliveries.map((delivery) => (
+                <div
+                  key={delivery.id}
+                  className="rounded-lg border border-border bg-card px-4 py-3 flex items-start gap-3 flex-wrap"
+                >
+                  {/* Timestamp */}
+                  <span className="text-xs text-muted-foreground w-36 shrink-0 pt-0.5">
+                    {new Date(delivery.createdAt).toLocaleString()}
+                  </span>
+
+                  {/* Success / fail icon */}
+                  <span className="shrink-0 pt-0.5">
+                    {delivery.success ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-red-500" />
+                    )}
+                  </span>
+
+                  {/* Status code badge */}
+                  {delivery.statusCode != null && (
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "shrink-0 text-xs font-mono",
+                        delivery.success
+                          ? "text-green-600 border-green-500 dark:text-green-400"
+                          : "text-red-600 border-red-500 dark:text-red-400"
+                      )}
+                    >
+                      {delivery.statusCode}
+                    </Badge>
+                  )}
+
+                  {/* Event name */}
+                  <span className="font-mono text-xs text-foreground shrink-0">{delivery.event}</span>
+
+                  {/* URL */}
+                  <span className="font-mono text-xs text-muted-foreground truncate flex-1 min-w-0">
+                    {delivery.webhookUrl}
+                  </span>
+
+                  {/* Error message (full row below if present) */}
+                  {!delivery.success && delivery.errorMessage && (
+                    <span className="w-full text-xs text-red-500 break-words pl-[calc(9rem+2rem+1rem)]">
+                      {delivery.errorMessage}
                     </span>
                   )}
                 </div>
