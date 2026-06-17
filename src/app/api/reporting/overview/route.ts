@@ -44,12 +44,25 @@ export async function GET(req: NextRequest) {
     : {};
 
   // ── 1. Reply volume per day ──────────────────────────────────────────────
+  // Only count messages that came from a campaign:
+  //   campaignId != null  → Instantly campaign reply (has the Instantly campaign UUID)
+  //   prospect.campaignName != null → HeyReach/other provider campaign reply
+  // This excludes system/notification emails (Google alerts, bounces, etc.)
+  // that land in Instantly mailboxes but are not real lead replies.
+  const campaignFilter = {
+    OR: [
+      { campaignId: { not: null } },
+      { thread: { prospect: { campaignName: { not: null } } } },
+    ],
+  };
+
   const inboundMessages = await prisma.message.findMany({
     where: {
       workspaceId: workspaceId!,
       direction: "INBOUND",
       sentAt: { gte: range.start, lte: range.end },
       ...channelWhere,
+      ...campaignFilter,
       ...(labelParam ? {
         thread: { threadLabels: { some: { label: { name: labelParam } } } },
       } : {}),
@@ -77,6 +90,7 @@ export async function GET(req: NextRequest) {
           direction: "INBOUND",
           sentAt: { gte: range.start, lte: range.end },
           ...channelWhere,
+          ...campaignFilter,
         },
       },
     },

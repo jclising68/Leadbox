@@ -511,7 +511,15 @@ export async function syncInstantly(
     return db - da;
   });
 
-  const newEmails = emails.filter((e) => !existingIds.has(e.id) && (e.lead || e.from_address_email || e.to_address_email_list));
+  const newEmails = emails.filter((e) => {
+    if (existingIds.has(e.id)) return false;
+    if (!e.lead && !e.from_address_email && !e.to_address_email_list) return false;
+    // Skip inbound emails not tied to a campaign — these are system/notification
+    // emails (Google alerts, bounce mailers, etc.) that land in Instantly mailboxes
+    // but are not real lead replies.
+    if (e.ue_type === 2 && !e.campaign_id) return false;
+    return true;
+  });
   console.log(`[sync] ${emails.length - newEmails.length} already synced, ${newEmails.length} new emails to process`);
 
   let synced = 0;
