@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/services/lead-activity";
 import { decrypt } from "@/lib/crypto";
 import { CLASSIFICATION_PROMPT } from "@/lib/constants";
 
@@ -207,4 +208,6 @@ export async function applyAutoLabel(
     }
     throw err;
   }
+
+  logActivity(workspaceId, threadId, null, "label_applied", { label: label.name });
 }

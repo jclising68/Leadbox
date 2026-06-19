@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { logActivity } from "@/services/lead-activity";
 import type { NormalizedWebhookPayload } from "@/types";
 import type { Prospect, Thread, Message } from "@prisma/client";
 
@@ -217,6 +218,15 @@ export async function resolveThread(
         });
       })
       .catch(() => {});
+
+    // Log "lead replied" activity — only for messages with real content
+    // (excludes connection-accepted / email-opened events that carry no body)
+    const hasContent = !!(result.message.bodyText?.trim() || result.message.messageText?.trim());
+    if (hasContent) {
+      logActivity(workspaceId, result.thread.id, result.prospect.id, "reply_received", {
+        channel: result.thread.channel,
+      });
+    }
   }
 
   return result;

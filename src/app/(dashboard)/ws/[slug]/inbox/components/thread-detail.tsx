@@ -117,6 +117,7 @@ type ActivityEvent = {
     | "follow_up_scheduled"
     | "follow_up_cleared"
     | "reply_sent"
+    | "reply_received"
     | "pipeline_added"
     | "pipeline_moved"
     | "pipeline_removed";
@@ -191,6 +192,11 @@ function ActivityFeed({ activities, loading }: { activities: ActivityEvent[]; lo
             Icon = Send;
             dotClass = "bg-blue-500";
             description = "You replied";
+            break;
+          case "reply_received":
+            Icon = MessageSquare;
+            dotClass = "bg-green-500";
+            description = "Lead replied";
             break;
           case "pipeline_added":
             Icon = GitBranch;

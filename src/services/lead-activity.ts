@@ -6,6 +6,7 @@ export type ActivityType =
   | "follow_up_scheduled"
   | "follow_up_cleared"
   | "reply_sent"
+  | "reply_received"
   | "pipeline_added"
   | "pipeline_moved"
   | "pipeline_removed";
