@@ -90,10 +90,10 @@
   --sidebar-border: oklch(0.91 0.004 260);
   --sidebar-ring: oklch(0.62 0.14 240);
 
-  /* Lead Assassin brand accents — sampled from leadassassin.com */
-  --brand-blue: #3b82c4;
-  --brand-gold: #e8a838;
-  --brand-red: #d93b3b;
+  /* Brand accents — sampled from jameschristianlising.com */
+  --brand-blue: #1e3fd1;
+  --brand-gold: #c9962e;
+  --brand-red: #c23b3b;
 }
 
 .dark {
@@ -133,10 +133,10 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.68 0.14 240);
 
-  /* Lead Assassin brand accents (slightly brightened for dark bg contrast) */
-  --brand-blue: #5ba0dd;
-  --brand-gold: #f0b84a;
-  --brand-red: #e85555;
+  /* Brand accents (slightly brightened for dark bg contrast) */
+  --brand-blue: #5c78e8;
+  --brand-gold: #e0b454;
+  --brand-red: #e06565;
 }
 
 @layer base {

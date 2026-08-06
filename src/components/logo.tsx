@@ -13,10 +13,10 @@ export function Logo({ iconOnly = false, className, priority = false }: LogoProp
   if (iconOnly) {
     return (
       <Image
-        src="/branding/leadassassin-logo.png"
-        alt="LeadBox"
-        width={2480}
-        height={2480}
+        src="/branding/leadsbox-logo.png"
+        alt="Leadsbox"
+        width={1024}
+        height={1024}
         priority={priority}
         className={cn("h-8 w-auto", className)}
       />
@@ -26,17 +26,17 @@ export function Logo({ iconOnly = false, className, priority = false }: LogoProp
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <Image
-        src="/branding/leadassassin-logo.png"
-        alt="LeadBox"
-        width={2480}
-        height={2480}
+        src="/branding/leadsbox-logo.png"
+        alt="Leadsbox"
+        width={1024}
+        height={1024}
         priority={priority}
         className="h-10 w-10 shrink-0"
       />
       <span
         className="font-[family-name:var(--font-inter)] text-xl font-black tracking-tight text-foreground"
       >
-        LEADBOX
+        LEADSBOX
       </span>
     </div>
   );

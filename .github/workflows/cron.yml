@@ -1,0 +1,26 @@
+name: Cron
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/15 * * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger inbox sync
+        run: |
+          curl -sf -X GET "https://leadbox-phi.vercel.app/api/cron/sync" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+
+  follow-up-notify:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger follow-up notify
+        run: |
+          curl -sf -X GET "https://leadbox-phi.vercel.app/api/cron/follow-up-notify" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

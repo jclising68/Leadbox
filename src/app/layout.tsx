@@ -29,7 +29,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "LeadBox - Unified Sales Inbox",
+  title: "Leadsbox - Unified Sales Inbox",
   description: "Centralized inbox for Instantly, HeyReach and more",
   icons: {
     icon: [
