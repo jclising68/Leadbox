@@ -13,7 +13,7 @@ jobs:
     steps:
       - name: Trigger inbox sync
         run: |
-          curl -sf -X GET "https://leadbox-phi.vercel.app/api/cron/sync" \
+          curl -sf -X GET "https://leadbox-phi-two.vercel.app/api/cron/sync" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
 
   follow-up-notify:
@@ -22,5 +22,5 @@ jobs:
     steps:
       - name: Trigger follow-up notify
         run: |
-          curl -sf -X GET "https://leadbox-phi.vercel.app/api/cron/follow-up-notify" \
+          curl -sf -X GET "https://leadbox-phi-two.vercel.app/api/cron/follow-up-notify" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
