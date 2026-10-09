@@ -11,7 +11,7 @@ These are non-negotiable. The user has been burned by each of these; violating t
 
 ## Stack & Auth
 
-- This is a **Next.js 15 + TypeScript + Supabase + Prisma + Bun** project, deployed on **Vercel**
+- This is a **Next.js 16 + TypeScript + Supabase + Prisma + Bun** project, deployed on **Vercel**
 - Always use **Supabase Auth** built-in methods for auth flows (password reset, email verification, magic links) — do NOT suggest third-party services like Resend unless explicitly asked
 - Check existing project patterns before implementing anything auth-related
 

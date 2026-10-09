@@ -43,7 +43,6 @@ import {
   X,
   Users,
   Copy,
-  Calendar,
   Check,
   Pencil,
   Sparkles,
@@ -287,7 +286,7 @@ function EditableCell({
       setSaving(false);
       setEditing(false);
     }
-  }, [localValue, value, workspaceId, prospectId, field, queryClient]);
+  }, [localValue, value, workspaceId, prospectId, field, fieldLabel, queryClient]);
 
   if (editing) {
     return (

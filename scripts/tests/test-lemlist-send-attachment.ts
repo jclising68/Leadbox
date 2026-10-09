@@ -16,9 +16,6 @@ const LEMLIST_REST_BASE = "https://api.lemlist.com/api";
 
 // Small public test image
 const TEST_IMAGE_URL = "https://www.gstatic.com/webp/gallery/1.jpg";
-// Small public PDF
-const TEST_PDF_URL =
-  "https://www.w3.org/WAI/WCAG21/Techniques/pdf/pdf-notes.pdf";
 
 async function tryMcpSendMessage(
   apiKey: string,

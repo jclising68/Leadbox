@@ -311,19 +311,18 @@ function PipelineFormDialog({
   const [stages, setStages] = useState<StageFormItem[]>(DEFAULT_STAGES);
 
   // Sync on open
-  const prevOpen = useRef(false);
-  if (open && !prevOpen.current) {
-    prevOpen.current = true;
-    setTimeout(() => {
+  const [prevOpen, setPrevOpen] = useState(false);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) {
       setName(initial?.name ?? "");
       setStages(
         initial?.stages.length
           ? initial.stages.map((s) => ({ id: s.id, name: s.name, color: s.color }))
           : DEFAULT_STAGES
       );
-    }, 0);
+    }
   }
-  if (!open) prevOpen.current = false;
 
   function addStage() {
     setStages((p) => [...p, { name: "", color: PRESET_COLORS[p.length % PRESET_COLORS.length] }]);
@@ -512,26 +511,29 @@ function DealDialog({
   const [stageId, setStageId] = useState("");
   const [notes, setNotes] = useState("");
   const [value, setValue] = useState("");
-  const [activities, setActivities] = useState<ActivityEvent[]>([]);
-  const [activitiesLoading, setActivitiesLoading] = useState(false);
+  const [loadedActivity, setLoadedActivity] = useState<{ key: string; data: ActivityEvent[] } | null>(null);
 
-  const prevOpen = useRef(false);
-  if (open && !prevOpen.current) {
-    prevOpen.current = true;
-    setTimeout(() => {
+  const [prevOpen, setPrevOpen] = useState(false);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) {
       setTitle(initial?.title ?? "");
       setStageId(initial?.stageId ?? defaultStageId ?? stages[0]?.id ?? "");
       setNotes(initial?.notes ?? "");
       setValue(initial?.value != null ? String(initial.value) : "");
-    }, 0);
+    }
   }
-  if (!open) prevOpen.current = false;
 
   // Fetch activity when dialog opens and deal has a threadId
+  // Loading/data are derived from which key has finished loading, so the effect only sets state in the async callback.
+  const activityKey = open && initial?.threadId && workspaceId ? `${workspaceId}:${initial.threadId}` : null;
+  const activitiesLoading = activityKey !== null && loadedActivity?.key !== activityKey;
+  const activities = activityKey !== null && loadedActivity?.key === activityKey ? loadedActivity.data : [];
+
   useEffect(() => {
     if (!open || !initial?.threadId || !workspaceId) return;
     let cancelled = false;
-    setActivitiesLoading(true);
+    const key = `${workspaceId}:${initial.threadId}`;
     fetch(`/api/threads/${initial.threadId}/activity`, {
       headers: { "x-workspace-id": workspaceId },
     })
@@ -539,8 +541,7 @@ function DealDialog({
       .catch(() => [])
       .then((data) => {
         if (!cancelled) {
-          setActivities(data);
-          setActivitiesLoading(false);
+          setLoadedActivity({ key, data });
         }
       });
     return () => { cancelled = true; };

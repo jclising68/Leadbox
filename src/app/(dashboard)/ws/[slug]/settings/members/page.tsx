@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { useWorkspaces } from "@/hooks/use-workspace";
@@ -108,7 +108,8 @@ export default function MembersPage() {
     role: string;
   } | null>(null);
   const [editRole, setEditRole] = useState("MEMBER");
-  const [editWorkspaceIds, setEditWorkspaceIds] = useState<string[]>([]);
+  // null = no local toggles yet; selection derives from the fetched memberships
+  const [editWorkspaceIdsOverride, setEditWorkspaceIdsOverride] = useState<string[] | null>(null);
 
   const { data: allWorkspaces } = useWorkspaces();
 
@@ -235,12 +236,10 @@ export default function MembersPage() {
     enabled: !!editingMember && !!workspaceId,
   });
 
-  // Pre-fill edit workspace checkboxes when memberships load
-  useEffect(() => {
-    if (editMemberships && editingMember) {
-      setEditWorkspaceIds(editMemberships.map((m) => m.workspaceId));
-    }
-  }, [editMemberships, editingMember]);
+  // Edit workspace checkboxes: pre-filled from memberships, overridden once the user toggles
+  const editWorkspaceIds =
+    editWorkspaceIdsOverride ??
+    (editingMember && editMemberships ? editMemberships.map((m) => m.workspaceId) : []);
 
   const updateMember = useMutation({
     mutationFn: async () => {
@@ -283,12 +282,14 @@ export default function MembersPage() {
       role: member.role,
     });
     setEditRole(member.role);
-    setEditWorkspaceIds([]); // will be filled by the query
+    setEditWorkspaceIdsOverride(null); // derived from the query
   }
 
   function toggleEditWorkspace(id: string) {
-    setEditWorkspaceIds((prev) =>
-      prev.includes(id) ? prev.filter((w) => w !== id) : [...prev, id]
+    setEditWorkspaceIdsOverride(
+      editWorkspaceIds.includes(id)
+        ? editWorkspaceIds.filter((w) => w !== id)
+        : [...editWorkspaceIds, id]
     );
   }
 

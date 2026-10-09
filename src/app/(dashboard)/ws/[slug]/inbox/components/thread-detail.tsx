@@ -239,6 +239,8 @@ export function ThreadDetail() {
   const { data: thread, isLoading, refetch: refetchThread, isFetching: isRefetchingThread } = useThread(selectedThreadId);
   const { data: labels } = useLabels();
   const updateThread = useUpdateThread();
+  // mutate is referentially stable in TanStack Query v5; the mutation result object is not
+  const { mutate: mutateThread } = updateThread;
   const addLabel = useAddLabel();
   const removeLabel = useRemoveLabel();
   const sendReply = useSendReply();
@@ -334,9 +336,9 @@ export function ThreadDetail() {
   // Mark as read when viewing
   useEffect(() => {
     if (thread?.isUnread && selectedThreadId) {
-      updateThread.mutate({ threadId: selectedThreadId, data: { isUnread: false } });
+      mutateThread({ threadId: selectedThreadId, data: { isUnread: false } });
     }
-  }, [thread?.isUnread, selectedThreadId]);
+  }, [thread?.isUnread, selectedThreadId, mutateThread]);
 
   // Scroll to bottom when thread loads
   useEffect(() => {

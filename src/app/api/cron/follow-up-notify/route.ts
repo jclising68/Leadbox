@@ -10,10 +10,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!baseUrl) {
+    console.error("[cron/follow-up-notify] NEXT_PUBLIC_APP_URL is not set; cannot build Slack links");
+    return NextResponse.json(
+      { error: "NEXT_PUBLIC_APP_URL is not configured" },
+      { status: 500 }
+    );
+  }
+
   after(async () => {
     const now = new Date();
-
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://leadbox-leadassassin.vercel.app";
 
     const workspaces = await prisma.workspace.findMany({
       where: { slackWebhookUrl: { not: null } },

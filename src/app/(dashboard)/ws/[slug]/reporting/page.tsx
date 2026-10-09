@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { useLabels } from "@/hooks/use-labels";
 import {
@@ -379,44 +380,40 @@ export default function ReportingPage() {
   const [selectedMonth, setSelectedMonth] = useState(months[0].value);
   const [source, setSource] = useState<SourceFilter>("all");
   const [selectedLabel, setSelectedLabel] = useState("");
-  const [data, setData] = useState<ReportData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [bounceData, setBounceData] = useState<BounceData | null>(null);
-  const [bounceLoading, setBounceLoading] = useState(false);
+  const reportQuery = useQuery<ReportData>({
+    queryKey: ["reporting-overview", workspaceId, selectedMonth, source, selectedLabel],
+    enabled: !!workspaceId,
+    queryFn: async () => {
+      const params = new URLSearchParams({ month: selectedMonth });
+      if (source !== "all") params.set("source", source);
+      if (selectedLabel) params.set("label", selectedLabel);
+      const r = await fetch(`/api/reporting/overview?${params}`, {
+        headers: { "x-workspace-id": workspaceId! },
+      });
+      if (!r.ok) throw new Error("Failed to load report");
+      return r.json();
+    },
+  });
+  const data = reportQuery.data ?? null;
+  const loading = reportQuery.isFetching;
+  const error = reportQuery.error ? (reportQuery.error as Error).message : null;
 
-  useEffect(() => {
-    if (!workspaceId) return;
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams({ month: selectedMonth });
-    if (source !== "all") params.set("source", source);
-    if (selectedLabel) params.set("label", selectedLabel);
-
-    fetch(`/api/reporting/overview?${params}`, {
-      headers: { "x-workspace-id": workspaceId },
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error("Failed to load report");
-        return r.json();
-      })
-      .then((d: ReportData) => setData(d))
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [workspaceId, selectedMonth, source, selectedLabel]);
-
-  useEffect(() => {
-    if (!workspaceId) return;
-    setBounceLoading(true);
-    const params = new URLSearchParams({ month: selectedMonth });
-    fetch(`/api/reporting/bounces?${params}`, {
-      headers: { "x-workspace-id": workspaceId },
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: BounceData | null) => setBounceData(d))
-      .catch(() => setBounceData(null))
-      .finally(() => setBounceLoading(false));
-  }, [workspaceId, selectedMonth]);
+  const bounceQuery = useQuery<BounceData | null>({
+    queryKey: ["reporting-bounces", workspaceId, selectedMonth],
+    enabled: !!workspaceId,
+    queryFn: async () => {
+      try {
+        const r = await fetch(`/api/reporting/bounces?${new URLSearchParams({ month: selectedMonth })}`, {
+          headers: { "x-workspace-id": workspaceId! },
+        });
+        return r.ok ? ((await r.json()) as BounceData) : null;
+      } catch {
+        return null;
+      }
+    },
+  });
+  const bounceData = bounceQuery.data ?? null;
+  const bounceLoading = bounceQuery.isFetching;
 
   const labelList = (labels as { id: string; name: string }[]);
 

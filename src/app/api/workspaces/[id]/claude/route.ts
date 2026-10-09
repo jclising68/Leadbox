@@ -4,8 +4,7 @@ import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { encrypt } from "@/lib/crypto";
 
 export async function POST(
-  req: NextRequest,
-  { params: _params }: { params: Promise<{ id: string }> }
+  req: NextRequest
 ) {
   const { error, workspaceId } = await requireWorkspaceAccess(req, "ADMIN");
   if (error) return error;
@@ -31,8 +30,7 @@ export async function POST(
 }
 
 export async function DELETE(
-  req: NextRequest,
-  { params: _params }: { params: Promise<{ id: string }> }
+  req: NextRequest
 ) {
   const { error, workspaceId } = await requireWorkspaceAccess(req, "ADMIN");
   if (error) return error;

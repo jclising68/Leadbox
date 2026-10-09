@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useCurrentWorkspaceId } from "@/hooks/use-current-workspace";
 import { useWorkspaces } from "@/hooks/use-workspace";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,7 +26,6 @@ export default function WorkspacePage() {
   const { data: workspaces, isLoading } = useWorkspaces();
   const queryClient = useQueryClient();
   const router = useRouter();
-  const params = useParams();
   const [newName, setNewName] = useState("");
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,9 +26,8 @@ interface UserProfile {
 }
 
 export default function PersonalDetailsPage() {
-  const [name, setName] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState("");
-  const [linkedinUrl, setLinkedinUrl] = useState("");
+  // Local edits only; displayed values derive from the loaded profile until edited.
+  const [edits, setEdits] = useState<{ name?: string; avatarUrl?: string; linkedinUrl?: string }>({});
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -45,13 +44,12 @@ export default function PersonalDetailsPage() {
     staleTime: 30000,
   });
 
-  useEffect(() => {
-    if (profile) {
-      setName(profile.name ?? "");
-      setAvatarUrl(profile.avatarUrl ?? "");
-      setLinkedinUrl(profile.linkedinUrl ?? "");
-    }
-  }, [profile]);
+  const name = edits.name ?? profile?.name ?? "";
+  const avatarUrl = edits.avatarUrl ?? profile?.avatarUrl ?? "";
+  const linkedinUrl = edits.linkedinUrl ?? profile?.linkedinUrl ?? "";
+  const setName = (v: string) => setEdits((p) => ({ ...p, name: v }));
+  const setAvatarUrl = (v: string) => setEdits((p) => ({ ...p, avatarUrl: v }));
+  const setLinkedinUrl = (v: string) => setEdits((p) => ({ ...p, linkedinUrl: v }));
 
   const updateProfile = useMutation({
     mutationFn: async () => {

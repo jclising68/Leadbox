@@ -4,8 +4,7 @@ import { requireWorkspaceAccess } from "@/lib/auth-helpers";
 import { workspaceJson } from "@/lib/api-response";
 
 export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  req: NextRequest
 ) {
   const { error, workspaceId } = await requireWorkspaceAccess(req);
   if (error) return error;
@@ -22,8 +21,7 @@ export async function GET(
 }
 
 export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  req: NextRequest
 ) {
   const { error, user: caller } = await requireWorkspaceAccess(req, "ADMIN");
   if (error) return error;
@@ -90,8 +88,7 @@ export async function POST(
 }
 
 export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  req: NextRequest
 ) {
   const { error, user: caller } = await requireWorkspaceAccess(req, "ADMIN");
   if (error) return error;
@@ -167,8 +164,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  req: NextRequest
 ) {
   const { error, workspaceId } = await requireWorkspaceAccess(req, "ADMIN");
   if (error) return error;

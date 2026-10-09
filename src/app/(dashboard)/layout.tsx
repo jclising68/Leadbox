@@ -2,7 +2,7 @@
 
 import { useSession } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useWorkspaces } from "@/hooks/use-workspace";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { AppSidebar } from "./components/app-sidebar";
@@ -13,12 +13,12 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const router = useRouter();
   const pathname = usePathname();
   const { data: workspaces, isLoading: loadingWorkspaces } = useWorkspaces();
   const { activeWorkspaceId, setActiveWorkspace } = useWorkspaceStore();
-  const [creating, setCreating] = useState(false);
+  const creating = useRef(false);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -30,8 +30,8 @@ export default function DashboardLayout({
   useEffect(() => {
     if (!workspaces || loadingWorkspaces) return;
 
-    if (workspaces.length === 0 && !creating) {
-      setCreating(true);
+    if (workspaces.length === 0 && !creating.current) {
+      creating.current = true;
       fetch("/api/workspaces", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -43,12 +43,12 @@ export default function DashboardLayout({
         })
         .then((ws) => {
           setActiveWorkspace(ws.id);
-          setCreating(false);
+          creating.current = false;
           router.replace(`/ws/${ws.slug}/inbox`);
         })
         .catch((err) => {
           console.error("[dashboard] Workspace creation failed:", err);
-          setCreating(false);
+          creating.current = false;
         });
       return;
     }
@@ -56,7 +56,7 @@ export default function DashboardLayout({
     if (workspaces.length > 0 && !activeWorkspaceId) {
       setActiveWorkspace(workspaces[0].id);
     }
-  }, [workspaces, loadingWorkspaces, activeWorkspaceId, setActiveWorkspace, creating, router]);
+  }, [workspaces, loadingWorkspaces, activeWorkspaceId, setActiveWorkspace, router]);
 
   // Redirect bare paths (e.g. /inbox) to workspace-prefixed paths
   useEffect(() => {

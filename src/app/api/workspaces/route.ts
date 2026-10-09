@@ -4,7 +4,7 @@ import { getAuthUser } from "@/lib/auth-helpers";
 import { workspaceJson } from "@/lib/api-response";
 import { DEFAULT_LABELS } from "@/lib/constants";
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   const user = await getAuthUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
