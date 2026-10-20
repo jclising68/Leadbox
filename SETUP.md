@@ -59,11 +59,11 @@ Before handing off, check: `bunx tsc --noEmit`, `bun run lint`, `bun run build`.
 3. `vercel.json` pins functions to region `sin1` (Singapore). Change it to the region closest to your Supabase database.
 4. Deploy and confirm the build passes.
 
-## 7. Fix the cron job (scheduled sync) — required edits
-Syncing runs from GitHub Actions (`.github/workflows/cron.yml`), not Vercel Cron.
-1. **Edit `cron.yml`**: it hardcodes `https://leadbox-phi.vercel.app`. Replace it with your own Vercel domain in both `curl` lines (`/api/cron/sync` and `/api/cron/follow-up-notify`).
-2. GitHub repo → Settings → Secrets and variables → Actions → New secret: `CRON_SECRET` = the same value as in Vercel.
-3. Actions tab → Cron → Run workflow to test. It must go green. (A failing run with curl exit code 22 means the secret doesn't match or the URL is wrong.)
+## 7. Set up the cron job (scheduled sync)
+Syncing runs from GitHub Actions (`.github/workflows/cron.yml`), not Vercel Cron. No file edits needed — set two things in GitHub repo → Settings → Secrets and variables → Actions:
+1. **Variables tab → New repository variable:** `APP_URL` = your production URL with no trailing slash, e.g. `https://your-app.vercel.app`. Use the domain that is actually attached to *your* Vercel project (Vercel → project → Domains).
+2. **Secrets tab → New repository secret:** `CRON_SECRET` = the exact same value as in Vercel. After changing it in Vercel, **redeploy production** so it takes effect.
+3. Actions tab → Cron → Run workflow to test. Both jobs must go green. Curl exit code 22 = the server returned an error: wrong `APP_URL` (pointing at someone else's deployment) or mismatched `CRON_SECRET`.
 
 ## 8. Connect the data sources (inside the app)
 1. Register / log in, create a workspace.
